@@ -1,0 +1,7 @@
+check	details
+country_label_variants	"{""France"": 1694445}"
+dataset_distribution	"{""test_source1"": 259452, ""test_source2"": 703378, ""test_source3"": 731615}"
+diacritics	"{""accent_in_names"": 388586, ""accent_in_addresses"": 335837}"
+postal_codes	"{""total"": 8262, ""unique"": 703, ""leading_zero"": 3396, ""samples"": [""00100"", ""00101"", ""00102"", ""00103"", ""00104"", ""00105"", ""00106"", ""00107"", ""00108"", ""00109""]}"
+address_abbreviations	"{""Boulevard/Bd"": 69800, ""Rue/R."": 743152, ""Avenue/Av."": 183944, ""Saint/St"": 181055, ""Sainte/Ste"": 31504, ""CEDEX"": 181}"
+branch_ambiguity	"{""count"": 197782, ""samples"": [{""business_name"": ""\""\"" elfes amicale sa"", ""count"": 2, ""addresses"": 2}, {""business_name"": ""\""\""l judo amicale sarl"", ""count"": 2, ""addresses"": 2}, {""business_name"": ""\""\""le cmp comite sas"", ""count"": 2, ""addresses"": 2}, {""business_name"": ""\""accueil ecole"", ""count"": 3, ""addresses"": 3}, {""business_name"": ""\""centre amicale sarl"", ""count"": 2, ""addresses"": 2}, {""business_name"": ""\""centre anciens sasu"", ""count"": 3, ""addresses"": 3}, {""business_name"": ""\""centre atelier sasu"", ""count"": 2, ""addresses"": 2}, {""business_name"": ""\""centre ateliers"", ""count"": 3, ""addresses"": 2}, {""business_name"": ""\""centre fetes"", ""count"": 2, ""addresses"": 2}, {""business_name"": ""\""centre fetes sa"", ""count"": 2, ""addresses"": 2}]}"
