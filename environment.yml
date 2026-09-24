@@ -1,0 +1,15 @@
+name: er-challenge
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.10
+  - pip
+  - numpy>=1.24.0
+  - pandas>=2.0.0
+  - scikit-learn>=1.3.0
+  - tqdm>=4.66.0
+  - pyarrow>=14.0.0
+  - pytest>=8.0.0
+  - pip:
+      - -r requirements.txt
