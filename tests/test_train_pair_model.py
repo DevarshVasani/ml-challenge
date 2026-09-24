@@ -72,6 +72,21 @@ class TestTrainPairModel(unittest.TestCase):
         self.assertEqual(threshold, 0.5)
         self.assertAlmostEqual(metrics["macro_f05"], 1.0)
 
+    def test_endpoint_folds_exclude_candidate_validation_records(self):
+        frame = pd.DataFrame(
+            {
+                "source1_entity_id": ["S1-a", "S1-a", "S1-b", "S1-b", "S1-c", "S1-c"],
+                "candidate_entity_id": ["S2-a", "S2-b", "S2-c", "S2-d", "S2-e", "S2-f"],
+                "source1_fold": [0, 0, 1, 1, 2, 2],
+                "candidate_fold": [0, 1, 1, 2, 2, 0],
+                "label": [1, 0, 1, 0, 1, 0],
+                "useful_feature": [0, 1, 2, 3, 4, 5],
+            }
+        )
+        generate_oof_predictions(frame, classifier_factory=RecordingClassifier)
+        self.assertEqual([len(values) for values in RecordingClassifier.fits], [3, 3, 3])
+        self.assertEqual(set(RecordingClassifier.fits[0]), {2, 3, 4})
+
 
 if __name__ == "__main__":
     unittest.main()
