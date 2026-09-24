@@ -61,12 +61,6 @@ data/
 *.npy
 *.npz
 
-# Allow configuration TSVs/CSVs if explicitly tracked
-!configs/*.tsv
-!configs/*.csv
-!tests/fixtures/*.tsv
-!tests/fixtures/*.csv
-
 # Models & Logs
 models/
 checkpoints/
