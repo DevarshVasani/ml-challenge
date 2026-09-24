@@ -1,175 +1,153 @@
-"""Submission exporter for Entity Resolution challenge.
-
-Produces standard tab-separated submission files:
-1. matching_results.tsv:
-   - Columns: source1_entity_id, matched_entity_ids
-   - Final matched entities per Source 1 record (empty for singletons)
-2. candidate_pairs.tsv:
-   - Columns: source1_entity_id, candidate_entity_ids
-   - Candidate pairs considered during blocking / model scoring
-
-Formatting Rules:
-- Exactly one row per Source 1 entity in the evaluation / test set.
-- Leave matched_entity_ids / candidate_entity_ids empty for singletons / no-candidates.
-- No duplicate IDs within a list.
-- Tab-separated values with NO surrounding quotes.
-"""
+"""Official grouped TSV export and output validation."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
-import sys
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set
+from pathlib import Path
+from typing import Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+
+import pandas as pd
 
 
 def clean_id_list(ids: Optional[Iterable[str]]) -> List[str]:
-    """Clean and deduplicate a sequence of entity IDs while preserving order."""
     if not ids:
         return []
-    seen: Set[str] = set()
-    cleaned: List[str] = []
+    seen: Set[str] = set(); cleaned: List[str] = []
     for item in ids:
         if item is None:
             continue
-        tok = str(item).strip()
-        if tok and tok not in seen:
-            seen.add(tok)
-            cleaned.append(tok)
+        value = str(item).strip()
+        if value and value not in seen:
+            seen.add(value); cleaned.append(value)
     return cleaned
 
 
 def load_test_s1_ids(test_source1_path: str, id_col: str = "entity_id") -> List[str]:
-    """Load all Source 1 entity IDs from test_source1.tsv in order."""
-    s1_ids: List[str] = []
-    with open(test_source1_path, mode="r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f, delimiter="\t")
+    with open(test_source1_path, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
         if id_col not in (reader.fieldnames or []):
             raise KeyError(f"Expected column '{id_col}' in '{test_source1_path}'. Found: {reader.fieldnames}")
-        for row in reader:
-            eid = row[id_col].strip()
-            if eid:
-                s1_ids.append(eid)
-    return s1_ids
+        return [row[id_col].strip() for row in reader if row[id_col].strip()]
 
 
-def write_submission_tsv(
-    s1_ids: Sequence[str],
-    predictions: Mapping[str, Iterable[str]],
-    output_path: str,
-    id_col: str = "source1_entity_id",
-    list_col: str = "matched_entity_ids",
-) -> None:
-    """Write submission TSV with exact 1-row-per-S1 structure and empty strings for singletons.
+def _validate_mappings(s1_ids: Sequence[str], predictions: Mapping[str, Iterable[str]], candidates: Mapping[str, Iterable[str]] | None = None, s2_ids: Set[str] | None = None, s3_ids: Set[str] | None = None) -> None:
+    required = list(s1_ids)
+    if len(required) != len(set(required)):
+        raise ValueError("test S1 IDs contain duplicates")
+    required_set = set(required)
+    for name, mapping in (("predictions", predictions), ("candidates", candidates or {})):
+        unknown = set(mapping) - required_set
+        if unknown:
+            raise ValueError(f"{name} contains unknown S1 IDs: {sorted(unknown)[:5]}")
+        for s1_id, values in mapping.items():
+            ids = clean_id_list(values)
+            if any(value == s1_id or value in required_set for value in ids):
+                raise ValueError(f"{name} contains a Source 1 ID for {s1_id}")
+            if s2_ids is not None or s3_ids is not None:
+                valid = (s2_ids or set()) | (s3_ids or set())
+                unknown_ids = set(ids) - valid
+                if unknown_ids:
+                    raise ValueError(f"{name} contains unknown candidate IDs: {sorted(unknown_ids)[:5]}")
+    if candidates is not None:
+        for s1_id, values in predictions.items():
+            missing = set(clean_id_list(values)) - set(clean_id_list(candidates.get(s1_id, [])))
+            if missing:
+                raise ValueError(f"final matches for {s1_id} are not in its final candidate list: {sorted(missing)[:5]}")
 
-    Args:
-        s1_ids: Ordered sequence of all Source 1 entity IDs in the target set.
-        predictions: Mapping of s1_id -> iterable of matched entity IDs.
-        output_path: Destination path.
-        id_col: Name of ID column (e.g., 'source1_entity_id').
-        list_col: Name of list column (e.g., 'matched_entity_ids' or 'candidate_entity_ids').
-    """
+
+def validate_submission_data(s1_ids: Sequence[str], predictions: Mapping[str, Iterable[str]], candidates: Mapping[str, Iterable[str]], s2_ids: Set[str] | None = None, s3_ids: Set[str] | None = None) -> None:
+    _validate_mappings(s1_ids, predictions, candidates, s2_ids, s3_ids)
+
+
+def write_submission_tsv(s1_ids: Sequence[str], predictions: Mapping[str, Iterable[str]], output_path: str, id_col: str = "source1_entity_id", list_col: str = "matched_entity_ids") -> None:
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-    with open(output_path, mode="w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(
-            f,
-            delimiter="\t",
-            quoting=csv.QUOTE_MINIMAL,
-            lineterminator="\n",
-        )
-        # Header
+    with open(output_path, mode="w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle, delimiter="\t", quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
         writer.writerow([id_col, list_col])
-
-        # Rows
         for s1_id in s1_ids:
-            raw_matches = predictions.get(s1_id, [])
-            cleaned = clean_id_list(raw_matches)
-            match_str = ",".join(cleaned)
-            writer.writerow([s1_id, match_str])
+            writer.writerow([s1_id, ",".join(clean_id_list(predictions.get(s1_id, [])))])
 
 
-def export_matching_results(
-    s1_ids: Sequence[str],
-    predictions: Mapping[str, Iterable[str]],
-    output_path: str = "output/matching_results.tsv",
-) -> None:
-    """Export final matching results TSV."""
-    write_submission_tsv(
-        s1_ids=s1_ids,
-        predictions=predictions,
-        output_path=output_path,
-        id_col="source1_entity_id",
-        list_col="matched_entity_ids",
-    )
+def candidate_table_to_mapping(candidate_table: pd.DataFrame, s1_ids: Sequence[str] | None = None) -> dict[str, list[str]]:
+    required = {"source1_entity_id", "candidate_entity_id"}
+    if not required.issubset(candidate_table.columns):
+        raise ValueError(f"candidate table must contain {sorted(required)}")
+    mapping: dict[str, list[str]] = {str(s1): [] for s1 in (s1_ids or candidate_table["source1_entity_id"].astype(str).tolist())}
+    for row in candidate_table.itertuples(index=False):
+        source1 = str(row.source1_entity_id); candidate = str(row.candidate_entity_id)
+        mapping.setdefault(source1, []).append(candidate)
+    return {source1: clean_id_list(values) for source1, values in mapping.items()}
 
 
-def export_candidate_pairs(
-    s1_ids: Sequence[str],
-    candidates: Mapping[str, Iterable[str]],
-    output_path: str = "output/candidate_pairs.tsv",
-) -> None:
-    """Export candidate pairs TSV from blocking/candidate generation."""
-    write_submission_tsv(
-        s1_ids=s1_ids,
-        predictions=candidates,
-        output_path=output_path,
-        id_col="source1_entity_id",
-        list_col="candidate_entity_ids",
-    )
+def export_candidate_table(candidate_table: pd.DataFrame, s1_ids: Sequence[str], output_path: str = "output/candidate_pairs.tsv") -> None:
+    mapping = candidate_table_to_mapping(candidate_table, s1_ids)
+    export_candidate_pairs(s1_ids, mapping, output_path)
 
 
-def export_all(
-    s1_ids: Sequence[str],
-    predictions: Mapping[str, Iterable[str]],
-    candidates: Optional[Mapping[str, Iterable[str]]] = None,
-    output_dir: str = "output",
-) -> Tuple[str, Optional[str]]:
-    """Export both matching_results.tsv and candidate_pairs.tsv into output directory."""
+def export_matching_results(s1_ids: Sequence[str], predictions: Mapping[str, Iterable[str]], output_path: str = "output/matching_results.tsv") -> None:
+    write_submission_tsv(s1_ids, predictions, output_path, "source1_entity_id", "matched_entity_ids")
+
+
+def export_candidate_pairs(s1_ids: Sequence[str], candidates: Mapping[str, Iterable[str]], output_path: str = "output/candidate_pairs.tsv") -> None:
+    write_submission_tsv(s1_ids, candidates, output_path, "source1_entity_id", "candidate_entity_ids")
+
+
+def export_all(s1_ids: Sequence[str], predictions: Mapping[str, Iterable[str]], candidates: Optional[Mapping[str, Iterable[str]]] = None, output_dir: str = "output") -> Tuple[str, Optional[str]]:
     os.makedirs(output_dir, exist_ok=True)
+    if candidates is not None:
+        _validate_mappings(s1_ids, predictions, candidates)
+    else:
+        _validate_mappings(s1_ids, predictions)
     matching_path = os.path.join(output_dir, "matching_results.tsv")
     export_matching_results(s1_ids, predictions, matching_path)
-
     candidate_path = None
     if candidates is not None:
         candidate_path = os.path.join(output_dir, "candidate_pairs.tsv")
         export_candidate_pairs(s1_ids, candidates, candidate_path)
-
     return matching_path, candidate_path
 
 
-def main():
+def _read_output_mapping(path: str, expected_columns: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    with open(path, newline="", encoding="utf-8") as handle:
+        header = handle.readline().rstrip("\n\r").split("\t")
+        if header != expected_columns:
+            raise ValueError(f"{path} must have exact columns {expected_columns}; got {header}")
+        rows = list(csv.reader(handle, delimiter="\t"))
+    ids: list[str] = []; mapping: dict[str, list[str]] = {}
+    for row in rows:
+        if len(row) != 2:
+            raise ValueError(f"{path} contains a non-tab-separated or malformed row")
+        raw_ids = [value.strip() for value in row[1].split(",") if value.strip()]
+        if len(raw_ids) != len(set(raw_ids)):
+            raise ValueError(f"{path} contains duplicate IDs in the row for {row[0]}")
+        ids.append(row[0]); mapping[row[0]] = clean_id_list(row[1].split(","))
+    return ids, mapping
+
+
+def validate_submission_files(matching_path: str, candidate_path: str, test_source1_path: str, test_source2_path: str, test_source3_path: str) -> None:
+    required_s1 = load_test_s1_ids(test_source1_path)
+    matching_ids, predictions = _read_output_mapping(matching_path, ["source1_entity_id", "matched_entity_ids"])
+    candidate_ids, candidates = _read_output_mapping(candidate_path, ["source1_entity_id", "candidate_entity_ids"])
+    if matching_ids != required_s1 or candidate_ids != required_s1:
+        raise ValueError("both output files must contain every test S1 exactly once and in test order")
+    s2 = set(pd.read_csv(test_source2_path, sep="\t", dtype=str, usecols=["entity_id"])["entity_id"])
+    s3 = set(pd.read_csv(test_source3_path, sep="\t", dtype=str, usecols=["entity_id"])["entity_id"])
+    validate_submission_data(required_s1, predictions, candidates, s2, s3)
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="Export Entity Resolution predictions to TSV.")
-    parser.add_argument("--test-s1", type=str, required=True, help="Path to test_source1.tsv to ensure all test entities exist")
-    parser.add_argument("--predictions-json", type=str, default=None, help="Path to JSON file with predictions {s1_id: [matches]}")
-    parser.add_argument("--candidates-json", type=str, default=None, help="Path to JSON file with candidate pairs {s1_id: [candidates]}")
-    parser.add_argument("--out-dir", type=str, default="output", help="Directory where matching_results.tsv and candidate_pairs.tsv are saved")
-
+    parser.add_argument("--test-s1", required=True); parser.add_argument("--predictions-json", default=None); parser.add_argument("--candidates-json", default=None); parser.add_argument("--out-dir", default="output")
     args = parser.parse_args()
-
     s1_ids = load_test_s1_ids(args.test_s1)
-    print(f"Loaded {len(s1_ids)} test S1 entities from {args.test_s1}")
-
-    predictions = {}
-    if args.predictions_json:
-        with open(args.predictions_json, "r", encoding="utf-8") as f:
-            predictions = json.load(f)
-
-    candidates = None
-    if args.candidates_json:
-        with open(args.candidates_json, "r", encoding="utf-8") as f:
-            candidates = json.load(f)
-
-    matching_path, cand_path = export_all(
-        s1_ids=s1_ids,
-        predictions=predictions,
-        candidates=candidates,
-        output_dir=args.out_dir,
-    )
+    predictions = json.loads(Path(args.predictions_json).read_text(encoding="utf-8")) if args.predictions_json else {}
+    candidates = json.loads(Path(args.candidates_json).read_text(encoding="utf-8")) if args.candidates_json else None
+    matching_path, candidate_path = export_all(s1_ids, predictions, candidates, args.out_dir)
     print(f"Exported matching results to: {matching_path}")
-    if cand_path:
-        print(f"Exported candidate pairs to:  {cand_path}")
+    if candidate_path: print(f"Exported candidate pairs to:  {candidate_path}")
 
 
 if __name__ == "__main__":
