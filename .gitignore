@@ -52,7 +52,6 @@ dataset/
 data/
 *.zip
 *.tar.gz
-*.tsv
 *.csv
 *.parquet
 *.feather
@@ -92,7 +91,7 @@ dist/
 build/
 
 # Audit output
-audit_output/
+configs/
 
 # IDE
 .vscode/
