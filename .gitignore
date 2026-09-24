@@ -92,6 +92,7 @@ build/
 
 # Audit output
 configs/
+audit_output/
 
 # IDE
 .vscode/
