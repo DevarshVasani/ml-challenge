@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
@@ -20,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from .split import load_folds_tsv, load_ground_truth
+from .text_utils import normalize_text
 
 
 ID_COLUMN = "entity_id"
@@ -186,15 +186,6 @@ def _source_for_candidate(candidate_id: str, row: Mapping[str, Any], s2_ids: set
     if in_s3 and not in_s2:
         return "S3"
     raise ValueError(f"Cannot determine source for candidate ID '{candidate_id}'")
-
-
-def normalize_text(value: Any) -> str:
-    """Normalize text without discarding digits or non-English characters."""
-    if value is None or _is_missing(value):
-        return ""
-    text = unicodedata.normalize("NFKC", str(value)).casefold().replace("&", " and ")
-    text = "".join(" " if unicodedata.category(char).startswith(("P", "S")) else char for char in text)
-    return " ".join(text.split())
 
 
 def _field(row: Mapping[str, Any], aliases: Sequence[str]) -> Any:
@@ -364,7 +355,12 @@ def add_labels_and_folds(
     ground_truth: Mapping[str, Iterable[str]] | None = None,
     folds: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
-    """Add labels and fold assignments, rejecting cross-fold pairs."""
+    """Add labels and endpoint folds without rejecting global negatives.
+
+    Every known positive is checked independently: a cross-fold positive means
+    the split is broken.  Negative candidates may cross folds because global
+    retrieval naturally produces those distractors.
+    """
     output = features.copy()
     if ground_truth is not None:
         true_sets = {str(k): set(str(x).strip() for x in values if str(x).strip()) for k, values in ground_truth.items()}
@@ -376,15 +372,23 @@ def add_labels_and_folds(
             raise ValueError(f"Missing fold assignments for pair endpoints: {sorted(missing)[:5]}")
         s1_folds = output[S1_ID_COLUMN].map(folds)
         candidate_folds = output[CANDIDATE_ID_COLUMN].map(folds)
-        bad = s1_folds != candidate_folds
-        if bad.any():
-            first = output.loc[bad].iloc[0]
-            raise ValueError(
-                "Cross-fold candidate pair rejected: "
-                f"{first[S1_ID_COLUMN]} (fold {s1_folds[bad].iloc[0]}) and "
-                f"{first[CANDIDATE_ID_COLUMN]} (fold {candidate_folds[bad].iloc[0]})"
-            )
-        output["fold"] = s1_folds.astype(int).to_numpy()
+        if ground_truth is not None:
+            for source1_id, matched_ids in ground_truth.items():
+                if source1_id not in folds:
+                    raise ValueError(f"Missing fold assignment for positive endpoint: {source1_id}")
+                for candidate_id in matched_ids:
+                    if candidate_id not in folds:
+                        raise ValueError(f"Missing fold assignment for positive endpoint: {candidate_id}")
+                    if int(folds[source1_id]) != int(folds[candidate_id]):
+                        raise ValueError(
+                            "Cross-fold positive pair rejected: "
+                            f"{source1_id} (fold {folds[source1_id]}) and "
+                            f"{candidate_id} (fold {folds[candidate_id]})"
+                        )
+        output["source1_fold"] = s1_folds.astype(int).to_numpy()
+        output["candidate_fold"] = candidate_folds.astype(int).to_numpy()
+        # Kept as a non-feature compatibility alias for older consumers.
+        output["fold"] = output["source1_fold"]
     return output
 
 

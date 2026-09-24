@@ -86,15 +86,21 @@ class TestFeatures(unittest.TestCase):
             self.assertEqual(table["fold"].tolist(), [0, 0, 1])
             self.assertEqual(table["retrieval_score"].tolist(), [0.9, 0.9, 0.8])
 
-    def test_validation_and_cross_fold_rejection(self):
+    def test_validation_and_cross_fold_rules(self):
         s1 = pd.DataFrame({"entity_id": ["S1-a"]})
         s2 = pd.DataFrame({"entity_id": ["S2-a"]})
         s3 = pd.DataFrame({"entity_id": ["S3-a"]})
         with self.assertRaisesRegex(ValueError, "unknown candidate"):
             validate_candidate_ids(pd.DataFrame({"source1_entity_id": ["S1-a"], "candidate_entity_id": ["S9-a"]}), s1, s2, s3)
-        with self.assertRaisesRegex(ValueError, "Cross-fold"):
+        negative = add_labels_and_folds(
+            pd.DataFrame({"source1_entity_id": ["S1-a"], "candidate_entity_id": ["S2-a"]}),
+            folds={"S1-a": 0, "S2-a": 1},
+        )
+        self.assertEqual(negative[["source1_fold", "candidate_fold"]].values.tolist(), [[0, 1]])
+        with self.assertRaisesRegex(ValueError, "Cross-fold positive"):
             add_labels_and_folds(
                 pd.DataFrame({"source1_entity_id": ["S1-a"], "candidate_entity_id": ["S2-a"]}),
+                ground_truth={"S1-a": ["S2-a"]},
                 folds={"S1-a": 0, "S2-a": 1},
             )
 
