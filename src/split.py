@@ -147,7 +147,11 @@ def partition_components(
             country = s1_meta.get(s1, {}).get("country", "UNKNOWN")
             countries.append(country)
 
-        primary_country = max(set(countries), key=countries.count) if countries else "UNKNOWN"
+        primary_country = (
+            min(set(countries), key=lambda country: (-countries.count(country), country))
+            if countries
+            else "UNKNOWN"
+        )
         is_singleton = (match_count == 0)
 
         comp_stats.append({
@@ -170,6 +174,7 @@ def partition_components(
     fold_loads = [{
         "s1_count": 0,
         "match_count": 0,
+        "total_entities": 0,
         "country_s1": defaultdict(int),
         "country_matches": defaultdict(int),
     } for _ in range(n_splits)]
@@ -177,37 +182,46 @@ def partition_components(
     # Assign each group
     for (country, is_singleton), items in sorted(groups.items(), key=lambda x: str(x[0])):
         # Sort items descending by match_count and num_s1 with tie-break randomness
+        items.sort(key=lambda item: item["root"])
         rng.shuffle(items)
         items.sort(key=lambda x: (x["match_count"], x["num_s1"], x["total_entities"]), reverse=True)
 
         for item in items:
             # Pick fold with minimum weighted load for this specific stratum and overall
             best_fold = 0
-            best_score = float("inf")
+            best_score = None
 
             for f_idx in range(n_splits):
                 load = fold_loads[f_idx]
-                if not is_singleton:
+                if item["num_s1"] == 0:
+                    # Unmatched S2/S3 components have no S1-derived load. Use
+                    # their entity count directly so each assignment affects
+                    # where the next unmatched component is placed.
+                    score = (load["total_entities"], f_idx)
+                elif not is_singleton:
                     # Score based on country match count & s1 count
-                    score = (
+                    weighted_score = (
                         load["country_matches"][country] * 3.0
                         + load["country_s1"][country] * 1.0
                         + load["match_count"] * 0.5
                     )
+                    score = (weighted_score, load["total_entities"], f_idx)
                 else:
                     # Score based on country s1 count
-                    score = (
+                    weighted_score = (
                         load["country_s1"][country] * 2.0
                         + load["s1_count"] * 1.0
                     )
+                    score = (weighted_score, load["total_entities"], f_idx)
 
-                if score < best_score:
+                if best_score is None or score < best_score:
                     best_score = score
                     best_fold = f_idx
 
             fold_assignments[item["root"]] = best_fold
             fold_loads[best_fold]["s1_count"] += item["num_s1"]
             fold_loads[best_fold]["match_count"] += item["match_count"]
+            fold_loads[best_fold]["total_entities"] += item["total_entities"]
             fold_loads[best_fold]["country_s1"][country] += item["num_s1"]
             fold_loads[best_fold]["country_matches"][country] += item["match_count"]
 

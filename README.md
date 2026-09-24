@@ -32,7 +32,7 @@ and test scores are cached in `artifacts/`. Add `--force` to recompute them.
 ## Individual stages
 
 ```bash
-python -m src.split --data-dir student_resource/dataset --out-folds artifacts/folds.tsv --verify
+python -m src.split --data-dir student_resource/dataset/train --out-folds artifacts/folds.tsv --verify
 python -m src.candidates --s1 student_resource/dataset/train/train_source1.tsv --s2 student_resource/dataset/train/train_source2.tsv --s3 student_resource/dataset/train/train_source3.tsv --gt student_resource/dataset/train/train_ground_truth.tsv --output artifacts/train_candidates.tsv --report artifacts/train_candidates.json
 python -m src.features --s1 student_resource/dataset/train/train_source1.tsv --s2 student_resource/dataset/train/train_source2.tsv --s3 student_resource/dataset/train/train_source3.tsv --candidates artifacts/train_candidates.tsv --ground-truth student_resource/dataset/train/train_ground_truth.tsv --folds artifacts/folds.tsv --output artifacts/train_features.parquet
 python -m src.train_pair_model --features artifacts/train_features.parquet --ground-truth student_resource/dataset/train/train_ground_truth.tsv --output-dir artifacts/model

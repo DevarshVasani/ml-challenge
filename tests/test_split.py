@@ -116,6 +116,47 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(entity_to_fold["S1-1"], entity_to_fold["S3-1"])
         self.assertEqual(summary["n_splits"], 3)
 
+    def test_unmatched_entities_are_spread_across_folds(self):
+        s1_path = os.path.join(self.temp_dir.name, "train_source1.tsv")
+        s2_path = os.path.join(self.temp_dir.name, "train_source2.tsv")
+        s3_path = os.path.join(self.temp_dir.name, "train_source3.tsv")
+        gt_path = os.path.join(self.temp_dir.name, "train_ground_truth.tsv")
+
+        with open(s1_path, "w", encoding="utf-8") as f:
+            f.write("entity_id\tbusiness_name\tcountry\n")
+        with open(gt_path, "w", encoding="utf-8") as f:
+            f.write("source1_entity_id\tmatched_entity_ids\n")
+        with open(s2_path, "w", encoding="utf-8") as f:
+            f.write("entity_id\n")
+            for index in range(6):
+                f.write(f"S2-{index}\n")
+        with open(s3_path, "w", encoding="utf-8") as f:
+            f.write("entity_id\n")
+            for index in range(3):
+                f.write(f"S3-{index}\n")
+
+        entity_to_fold, _ = create_folds(
+            s1_path,
+            gt_path,
+            s2_tsv_path=s2_path,
+            s3_tsv_path=s3_path,
+            n_splits=3,
+            seed=42,
+        )
+
+        fold_counts = [sum(fold == index for fold in entity_to_fold.values()) for index in range(3)]
+        self.assertEqual(fold_counts, [3, 3, 3])
+
+        repeated, _ = create_folds(
+            s1_path,
+            gt_path,
+            s2_tsv_path=s2_path,
+            s3_tsv_path=s3_path,
+            n_splits=3,
+            seed=42,
+        )
+        self.assertEqual(entity_to_fold, repeated)
+
 
 if __name__ == "__main__":
     unittest.main()
