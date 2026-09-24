@@ -1,19 +1,32 @@
-# Entity-resolution matching pipeline
+# Amazon ML Challenge — Business Entity Resolution
 
-## Setup
+Robust, production-grade infrastructure for Business Entity Resolution across multi-source commercial datasets.
+
+---
+
+## 🛠️ Setup & Environment
 
 Use Python 3.10+ and install the project dependencies:
 
 ```bash
+# Option 1: Standard pip / venv
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
+
+# Option 2: Conda / Mamba
+conda env create -f environment.yml
+conda activate er-challenge
 ```
 
-The expected layout is `student_resource/dataset/train/` containing
+The expected data layout is `student_resource/dataset/train/` containing
 `train_source1.tsv`, `train_source2.tsv`, `train_source3.tsv`, and
-`train_ground_truth.tsv`, plus the corresponding three test source files under
+`train_ground_truth.tsv`, plus the corresponding test source files under
 `student_resource/dataset/test/`.
 
-## Full run
+---
+
+## 🚀 Full Pipeline Run
 
 ```bash
 python -m src.pipeline \
@@ -29,40 +42,107 @@ python -m src.pipeline \
 Intermediate folds, candidates, features, model artifacts, OOF predictions,
 and test scores are cached in `artifacts/`. Add `--force` to recompute them.
 
-## Individual stages
+---
+
+## 🧩 Pipeline Stages & Modules
+
+### 1. Validation Splitting (`src/split.py`)
+Creates fixed 3-fold cross-validation splits balancing match counts and countries (`US`, `India`).
+- **Group Preservation**: Disjoint Set Union (DSU) groups each $S_1$ entity and all its transitively matched records ($S_2/S_3$) into connected components. If multiple $S_1$ entities share a match, they stay in the same fold.
+- **Strict Leakage Prevention**: Held-out validation records are strictly isolated and prevented from entering training candidate pairs or negative sampling sets.
 
 ```bash
-python -m src.split --data-dir student_resource/dataset/train --out-folds artifacts/folds.tsv --verify
-python -m src.candidates --s1 student_resource/dataset/train/train_source1.tsv --s2 student_resource/dataset/train/train_source2.tsv --s3 student_resource/dataset/train/train_source3.tsv --gt student_resource/dataset/train/train_ground_truth.tsv --output artifacts/train_candidates.tsv --report artifacts/train_candidates.json
-python -m src.features --s1 student_resource/dataset/train/train_source1.tsv --s2 student_resource/dataset/train/train_source2.tsv --s3 student_resource/dataset/train/train_source3.tsv --candidates artifacts/train_candidates.tsv --ground-truth student_resource/dataset/train/train_ground_truth.tsv --folds artifacts/folds.tsv --output artifacts/train_features.parquet
-python -m src.train_pair_model --features artifacts/train_features.parquet --ground-truth student_resource/dataset/train/train_ground_truth.tsv --output-dir artifacts/model
-python -m src.predict_pair_model --features artifacts/test_features.parquet --model-dir artifacts/model --output-dir artifacts/test_scores --s1-ids student_resource/dataset/test/test_source1.tsv
+python -m src.split \
+  --data-dir student_resource/dataset/train \
+  --out-folds artifacts/folds.tsv \
+  --out-summary reports/split_summary.json \
+  --verify
 ```
 
-The internal candidate table is long format and contains the exact pairs and
-retrieval diagnostics scored by the model. The official `candidate_pairs.tsv`
-is grouped to one row per test S1 entity for submission.
+### 2. Candidate Generation / Blocking (`src/candidates.py`)
+```bash
+python -m src.candidates \
+  --s1 student_resource/dataset/train/train_source1.tsv \
+  --s2 student_resource/dataset/train/train_source2.tsv \
+  --s3 student_resource/dataset/train/train_source3.tsv \
+  --gt student_resource/dataset/train/train_ground_truth.tsv \
+  --output artifacts/train_candidates.tsv \
+  --report artifacts/train_candidates.json
+```
 
-Folds keep known positive connected components together. During OOF training,
-validation rows are selected by `source1_fold`; training rows require both
-`source1_fold != validation_fold` and `candidate_fold != validation_fold`.
-Cross-fold negatives are retained, while cross-fold positives fail validation.
+### 3. Feature Engineering (`src/features.py`)
+```bash
+python -m src.features \
+  --s1 student_resource/dataset/train/train_source1.tsv \
+  --s2 student_resource/dataset/train/train_source2.tsv \
+  --s3 student_resource/dataset/train/train_source3.tsv \
+  --candidates artifacts/train_candidates.tsv \
+  --ground-truth student_resource/dataset/train/train_ground_truth.tsv \
+  --folds artifacts/folds.tsv \
+  --output artifacts/train_features.parquet
+```
 
-## Artifacts and reproducibility
+### 4. Model Training & Evaluation (`src/train_pair_model.py`, `src/evaluate.py`)
+```bash
+python -m src.train_pair_model \
+  --features artifacts/train_features.parquet \
+  --ground-truth student_resource/dataset/train/train_ground_truth.tsv \
+  --output-dir artifacts/model
+```
 
-The model directory contains `final_model.joblib`, `feature_columns.json`,
-`training_config.json`, OOF predictions in Parquet and TSV, the selected
-threshold, and `metrics.json`. Test inference writes pair scores and
-`predictions.json`; the pipeline writes `output/matching_results.tsv` and
-`output/candidate_pairs.tsv` and validates both files.
+### 5. Prediction & Submission Export (`src/predict_pair_model.py`, `src/export.py`)
+```bash
+python -m src.predict_pair_model \
+  --features artifacts/test_features.parquet \
+  --model-dir artifacts/model \
+  --output-dir artifacts/test_scores \
+  --s1-ids student_resource/dataset/test/test_source1.tsv
+```
 
-Run `python -m pytest -q` for tests. Candidate retrieval is deterministic for
-fixed input and CLI settings. No external identity data, geocoding,
-translation, business lookup, or identity-resolution API is used.
+Official output files written to `output/`:
+- `output/matching_results.tsv` (`source1_entity_id\tmatched_entity_ids`)
+- `output/candidate_pairs.tsv` (`source1_entity_id\tcandidate_entity_ids`)
 
-## Known limitations
+---
 
-TF-IDF retrieval is lexical and may miss entities with no shared character or
-word evidence. The baseline pair model is intentionally small and does not
-perform external enrichment. Full-size datasets can require substantial RAM,
-particularly when reading source tables and validating IDs.
+## 📊 Evaluation Metric (`src/evaluate.py`)
+
+Submissions are evaluated on a **macro-averaged $F_{0.5}$ score** across all Source 1 ($S_1$) entities.
+
+### Metric Formula:
+For non-singletons (entities with $\ge 1$ true matches):
+$$F_{0.5} = \frac{5 \cdot \text{TP}}{5 \cdot \text{TP} + 4 \cdot \text{FP} + \text{FN}}$$
+Where:
+- $\text{TP}$: Correct predicted matches ($|\text{True} \cap \text{Pred}|$)
+- $\text{FP}$: Incorrect predicted matches ($|\text{Pred} \setminus \text{True}|$)
+- $\text{FN}$: Missed true matches ($|\text{True} \setminus \text{Pred}|$)
+
+For singletons (entities with no true matches):
+- Score $= 1.0$ if the prediction is empty ($\emptyset$).
+- Score $= 0.0$ if any match is predicted (false merge).
+
+### Tiny Example Verifications:
+| Case | Ground Truth | Prediction | TP | FP | FN | Score |
+|---|---|---|---|---|---|---|
+| **Perfect Match** | `[S2-1, S3-2]` | `[S2-1, S3-2]` | 2 | 0 | 0 | **1.0000** |
+| **Extra Match** | `[S2-1]` | `[S2-1, S2-2]` | 1 | 1 | 0 | **5/9 ≈ 0.5556** |
+| **Missed Match** | `[S2-1, S3-2]` | `[S2-1]` | 1 | 0 | 1 | **5/6 ≈ 0.8333** |
+| **Empty Prediction (Non-Singleton)** | `[S2-1]` | `[]` | 0 | 0 | 1 | **0.0000** |
+| **Singleton (Empty Prediction)** | `[]` | `[]` | - | - | - | **1.0000** |
+| **Singleton (False Merge)** | `[]` | `[S2-1]` | - | - | - | **0.0000** |
+
+Run metric self-check:
+```bash
+python3 src/evaluate.py --check
+```
+
+---
+
+## 🧪 Testing
+
+Run test suite:
+```bash
+python -m pytest -q
+# or
+python3 -m unittest discover tests
+```
