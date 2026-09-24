@@ -90,10 +90,9 @@ __pycache__/
 dist/
 build/
 
-# Audit output
+# confings output
 configs/
-audit_output/
-
+audit_output/match_cardinality.tsv
 # IDE
 .vscode/
 .idea/
