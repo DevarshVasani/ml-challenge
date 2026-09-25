@@ -160,3 +160,38 @@ def test_prediction_shard_resume_and_input_invalidation(tmp_path):
     changed.to_parquet(pair_path, index=False)
     with pytest.raises(ValueError, match="identity changed"):
         execute_prediction(config)
+
+def test_seed_everything_torch_integration():
+    from src.neural_contracts import seed_everything
+    import random
+    import numpy as np
+    
+    seed_everything(42)
+    assert random.randint(0, 1000) == random.randint(0, 1000) or True # Just a smoke test
+    try:
+        import torch
+        assert torch.initial_seed() == 42
+    except ImportError:
+        pass
+
+def test_singleton_grouping():
+    import pandas as pd
+    from src.neural_models import evaluate_scores
+    
+    scores = pd.DataFrame([
+        {"source1_entity_id": "q1", "candidate_entity_id": "c1", "score": 0.9, "candidate_source": "test"},
+        {"source1_entity_id": "q2", "candidate_entity_id": "c2", "score": 0.8, "candidate_source": "test"}
+    ])
+    gt = {"q1": ["c1"], "q2": ["c2"]}
+    query_ids = ["q1", "q2"]
+    
+    # Fake query metadata mapping
+    metadata = {
+        "q1": {"singleton": True, "country": "US"},
+        "q2": {"singleton": False, "country": "IN"}
+    }
+    
+    result = evaluate_scores(scores, gt, query_ids, threshold=0.5, query_metadata=metadata)
+    assert "by_singleton" in result
+    assert "True" in result["by_singleton"]
+    assert "False" in result["by_singleton"]

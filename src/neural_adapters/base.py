@@ -17,6 +17,23 @@ class AdapterConfig:
     device: str = "cpu"
 
 
+
+PAIR_TEXT_FIELDS = (
+    "name_a",
+    "address_a",
+    "country_a",
+    "name_b",
+    "address_b",
+    "country_b",
+)
+
+def serialize_pair_fields(row, missing_text=""):
+    values = [
+        str(row.get(field, missing_text) or missing_text)
+        for field in PAIR_TEXT_FIELDS
+    ]
+    return " || ".join(values)
+
 class BasePairAdapter(ABC):
     """Adapters own model/tokenizer mechanics; the trainer owns optimization."""
 

@@ -1,0 +1,14 @@
+{
+  "scores": [
+    "artifacts/predictions-byt5-threshold",
+    "artifacts/predictions-byt5-final"
+  ],
+  "prediction_manifests": [
+    "artifacts/predictions-byt5-threshold/prediction_manifest.json",
+    "artifacts/predictions-byt5-final/prediction_manifest.json"
+  ],
+  "ground_truth": "artifacts/neural-data/ground_truth.json",
+  "query_manifest": "artifacts/neural-data/query_manifest.json",
+  "candidate_manifest": "artifacts/neural-candidates/manifest.json",
+  "output_dir": "artifacts/neural-evaluation-byt5"
+}

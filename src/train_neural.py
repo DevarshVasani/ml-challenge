@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .neural_adapters import AdapterConfig, get_adapter_class
-from .neural_contracts import atomic_write_text, file_identity
+from .neural_contracts import atomic_write_text, file_identity, seed_everything
 from .neural_models import NeuralTrainingConfig, load_training_state, train_neural
 
 
@@ -60,6 +60,7 @@ def execute(config: dict[str, Any]) -> dict[str, Any]:
     adapter_cls = get_adapter_class(adapter_type)
     adapter_cfg = AdapterConfig(adapter_type=adapter_type, checkpoint=str(training.get("checkpoint", config.get("checkpoint", ""))), revision=training.get("revision", config.get("revision")), max_length=int(training.get("max_length", config.get("max_length", 256))), device=str(training.get("device", "cpu")))
     run_cfg = NeuralTrainingConfig(**{key: value for key, value in training.items() if key in NeuralTrainingConfig.__dataclass_fields__})
+    seed_everything(run_cfg.seed)
     resume_dir = training.get("resume") or config.get("resume")
     resume_state = None
     if resume_dir:
