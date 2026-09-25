@@ -1,0 +1,7 @@
+dataset	rows	columns	column_names	unique_ids	duplicate_id_count	country_distribution
+test_source1	1732544	4	"[""entity_id"", ""business_name"", ""business_address"", ""country""]"	1732544	0	"{""India"": 809986, ""US"": 663106, ""France"": 259452}"
+test_source2	4887273	4	"[""entity_id"", ""business_name"", ""business_address"", ""country""]"	4887273	0	"{""India"": 2312565, ""US"": 1871330, ""France"": 703378}"
+test_source3	5082316	4	"[""entity_id"", ""business_name"", ""business_address"", ""country""]"	5082316	0	"{""India"": 2405000, ""US"": 1945701, ""France"": 731615}"
+train_source1	2206821	4	"[""entity_id"", ""business_name"", ""business_address"", ""country""]"	2206821	0	"{""US"": 1323633, ""India"": 883188}"
+train_source2	5034616	4	"[""entity_id"", ""business_name"", ""business_address"", ""country""]"	5034616	0	"{""US"": 3016817, ""India"": 2017799}"
+train_source3	5285603	4	"[""entity_id"", ""business_name"", ""business_address"", ""country""]"	5285603	0	"{""US"": 3170056, ""India"": 2115547}"

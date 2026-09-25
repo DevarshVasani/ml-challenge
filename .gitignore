@@ -29,6 +29,7 @@ env/
 
 # Testing & Linting
 .pytest_cache/
+.pytest-tmp/
 .coverage
 htmlcov/
 .tox/
@@ -52,7 +53,6 @@ dataset/
 data/
 *.zip
 *.tar.gz
-*.tsv
 *.csv
 *.parquet
 *.feather
@@ -60,12 +60,6 @@ data/
 *.joblib
 *.npy
 *.npz
-
-# Allow configuration TSVs/CSVs if explicitly tracked
-!configs/*.tsv
-!configs/*.csv
-!tests/fixtures/*.tsv
-!tests/fixtures/*.csv
 
 # Models & Logs
 models/
@@ -82,3 +76,28 @@ lightning_logs/
 output/
 tmp/
 temp/
+
+.venv/
+student_resource/
+# OS-generated
+.DS_Store
+*:Zone.Identifier
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# confings output
+configs/
+audit_output/match_cardinality.tsv
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+venv/
