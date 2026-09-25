@@ -20,6 +20,7 @@ import pandas as pd
 
 from .split import load_folds_tsv, load_ground_truth
 from .text_utils import normalize_text
+from .context_features import add_candidate_context_features
 
 
 ID_COLUMN = "entity_id"

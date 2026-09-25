@@ -156,3 +156,8 @@ python -m pytest -q
 # or
 python3 -m unittest discover tests
 ```
+# Experiment log
+
+`reports/experiments.csv` is a scaffold for measured runs. Values unavailable
+because a run has not been performed must be recorded as `N/A`; they must not
+be replaced with fabricated zeros.

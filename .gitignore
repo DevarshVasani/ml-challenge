@@ -54,6 +54,7 @@ data/
 *.zip
 *.tar.gz
 *.csv
+!reports/experiments.csv
 *.parquet
 *.feather
 *.pkl
