@@ -13,6 +13,73 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sparse_dot_topn import sp_matmul_topn
+<<<<<<< HEAD
+
+from .evaluate import evaluate_predictions
+from .text_utils import normalize_text
+
+
+def read_tsv(path: str | Path) -> pd.DataFrame:
+    return pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
+
+
+def load_source(path: str | Path, nrows: int | None = None) -> pd.DataFrame:
+    frame = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, nrows=nrows).copy()
+    if "entity_id" not in frame.columns:
+        raise ValueError(f"{path} must contain entity_id")
+    frame["entity_id"] = frame["entity_id"].astype(str).str.strip()
+    if frame["entity_id"].eq("").any() or frame["entity_id"].duplicated().any():
+        raise ValueError(f"{path} contains empty or duplicate entity_id values")
+    return frame
+
+
+def _text_column(frame: pd.DataFrame, field: str) -> pd.Series:
+    if field not in frame.columns:
+        return pd.Series([""] * len(frame), index=frame.index, dtype=object)
+    return frame[field].map(normalize_text)
+
+
+def _vectorizer(texts: Iterable[str]) -> TfidfVectorizer | None:
+    corpus = list(texts)
+    if not any(corpus):
+        return None
+    for kwargs in (
+        {"analyzer": "char", "ngram_range": (2, 4), "min_df": 2},
+        {"analyzer": "char", "ngram_range": (1, 4), "min_df": 1},
+        {"analyzer": "word", "ngram_range": (1, 2), "min_df": 1},
+    ):
+        vectorizer = TfidfVectorizer(**kwargs)
+        try:
+            vectorizer.fit(corpus)
+            if vectorizer.vocabulary_:
+                return vectorizer
+        except ValueError:
+            continue
+    return None
+
+
+def retrieve_channel(
+    s1: pd.DataFrame,
+    source: pd.DataFrame,
+    field: str,
+    top_k: int,
+    batch_size: int = 2048,
+    candidate_source: str = "S2",
+) -> pd.DataFrame:
+    """Retrieve one channel with sparse exact top-K cosine similarity.
+
+    sklearn.neighbors.NearestNeighbors falls back to brute-force search on
+    sparse TF-IDF input. Sparse top-N multiplication instead follows only
+    overlapping TF-IDF features and keeps at most top_k matches per query.
+    """
+    columns = ["source1_entity_id", "candidate_entity_id", "candidate_source", "score", "rank"]
+    if top_k <= 0 or source.empty or s1.empty:
+        return pd.DataFrame(columns=columns)
+
+    source_text = _text_column(source, field)
+    query_text = _text_column(s1, field)
+
+=======
 
 from .evaluate import evaluate_predictions
 from .text_utils import normalize_text
@@ -116,6 +183,7 @@ def retrieve_channel(
             sort=True,
             n_threads=n_threads,
         )
+<<<<<<< HEAD
 
         for local, s1_index in enumerate(batch_indices):
             row_start = similarities.indptr[local]
@@ -221,13 +289,89 @@ def retrieve_exact(s1: pd.DataFrame, source: pd.DataFrame, field: str, label: st
     return pd.DataFrame(rows, columns=["source1_entity_id", "candidate_entity_id", "candidate_source", "score", "rank"])
 
 
+        for local, s1_index in enumerate(batch_indices):
+            row_start = similarities.indptr[local]
+            row_end = similarities.indptr[local + 1]
+            candidate_indices = similarities.indices[row_start:row_end]
+            candidate_scores = similarities.data[row_start:row_end]
+
+            for rank, (source_index, score) in enumerate(
+                zip(candidate_indices, candidate_scores), start=1
+            ):
+                rows.append({
+                    "source1_entity_id": s1_ids[s1_index],
+                    "candidate_entity_id": source_ids[int(source_index)],
+                    "candidate_source": candidate_source,
+                    "score": float(score),
+                    "rank": rank,
+                })
+
+    return pd.DataFrame(rows, columns=columns)
+
+def retrieve_candidates(s1_df: pd.DataFrame, source_df: pd.DataFrame, column: str, n_candidates: int = 50, batch_size: int = 2048) -> pd.DataFrame:
+    """Compatibility wrapper for the original prototype API."""
+    field = "__retrieval_text__"
+    left = s1_df.copy(); right = source_df.copy()
+    original = column.removeprefix("norm_")
+    left[field] = left[column] if column in left.columns else _text_column(left, original)
+    right[field] = right[column] if column in right.columns else _text_column(right, original)
+    result = retrieve_channel(left, right, field, n_candidates, batch_size, "S2")
+    return result[["source1_entity_id", "candidate_entity_id", "score"]]
+
+
+def union_candidates(channels: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
+    """Union channels while retaining scores, flags, and ranks."""
+    parts: list[pd.DataFrame] = []
+    for channel_name, frame in channels.items():
+        if frame.empty:
+            continue
+        item = frame.copy()
+        item["retrieved_by_name"] = int("name" in channel_name)
+        item["retrieved_by_address"] = int("address" in channel_name)
+        item["name_tfidf_score"] = item["score"] if "name" in channel_name else 0.0
+        item["address_tfidf_score"] = item["score"] if "address" in channel_name else 0.0
+        item["name_rank"] = item["rank"] if "name" in channel_name else 0
+        item["address_rank"] = item["rank"] if "address" in channel_name else 0
+        parts.append(item)
+    output_columns = [
+        "source1_entity_id", "candidate_entity_id", "candidate_source",
+        "name_tfidf_score", "address_tfidf_score", "name_rank", "address_rank",
+        "retrieved_by_name", "retrieved_by_address", "retrieval_score",
+    ]
+    if not parts:
+        return pd.DataFrame(columns=output_columns)
+    combined = pd.concat(parts, ignore_index=True)
+    rows: list[dict[str, Any]] = []
+    for keys, group in combined.groupby(
+        ["source1_entity_id", "candidate_source", "candidate_entity_id"],
+        sort=False,
+        dropna=False,
+    ):
+        source1_id, candidate_source, candidate_id = keys
+        name_scores = pd.to_numeric(group["name_tfidf_score"], errors="coerce").fillna(0.0)
+        address_scores = pd.to_numeric(group["address_tfidf_score"], errors="coerce").fillna(0.0)
+        name_ranks = pd.to_numeric(group["name_rank"], errors="coerce").fillna(0)
+        address_ranks = pd.to_numeric(group["address_rank"], errors="coerce").fillna(0)
+        rows.append({
+            "source1_entity_id": str(source1_id), "candidate_entity_id": str(candidate_id),
+            "candidate_source": str(candidate_source),
+            "name_tfidf_score": float(name_scores.max()), "address_tfidf_score": float(address_scores.max()),
+            "name_rank": int(name_ranks[name_ranks > 0].min()) if (name_ranks > 0).any() else 0,
+            "address_rank": int(address_ranks[address_ranks > 0].min()) if (address_ranks > 0).any() else 0,
+            "retrieved_by_name": int(group["retrieved_by_name"].max()),
+            "retrieved_by_address": int(group["retrieved_by_address"].max()),
+            "retrieval_score": float(max(name_scores.max(), address_scores.max())),
+        })
+    return pd.DataFrame(rows, columns=output_columns)
+
+
 def generate_candidates(s1: pd.DataFrame, s2: pd.DataFrame, s3: pd.DataFrame, top_k_name: int = 50, top_k_address: int = 50, batch_size: int = 2048) -> pd.DataFrame:
     channels: dict[str, pd.DataFrame] = {}
     for label, source in (("S2", s2), ("S3", s3)):
         channels[f"{label}_exact_name"] = retrieve_exact(s1, source, "business_name", label)
         channels[f"{label}_exact_address"] = retrieve_exact(s1, source, "business_address", label)
-        # channels[f"{label}_name"] = retrieve_channel(s1, source, "business_name", top_k_name, batch_size, label)
-        # channels[f"{label}_address"] = retrieve_channel(s1, source, "business_address", top_k_address, batch_size, label)
+        channels[f"{label}_name"] = retrieve_channel(s1, source, "business_name", top_k_name, batch_size, label)
+        channels[f"{label}_address"] = retrieve_channel(s1, source, "business_address", top_k_address, batch_size, label)
     return union_candidates(channels)
 
 
