@@ -775,7 +775,13 @@ def main():
     ed = dr / "test"
     od = Path(args.output_dir)
     if not od.is_absolute(): od = repo_root / od
-    vp = repo_root / "student_resource" / "utils" / "validate_submission.py"
+    # Resolve validator: prefer data-root-relative, fall back to student_resource layout
+    _vp_candidates = [
+        dr.parent / "utils" / "validate_submission.py",
+        repo_root / "data" / "utils" / "validate_submission.py",
+        repo_root / "student_resource" / "utils" / "validate_submission.py",
+    ]
+    vp = next((p for p in _vp_candidates if p.exists()), _vp_candidates[2])
     sp = None
     if args.submission:
         sp = Path(args.submission)
