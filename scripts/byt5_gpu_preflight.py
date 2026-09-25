@@ -1,35 +1,3 @@
-"""Preflight checks before spending GPU time on the ByT5 baseline."""
-
-from __future__ import annotations
-
-import argparse
-import json
-import shutil
-from pathlib import Path
-
-
-def _pair_manifest_check(manifest_path: Path, pair_subdir: str) -> dict:
-    result = {"path": str(manifest_path), "exists": manifest_path.is_file(), "ok": False}
-    if not manifest_path.is_file():
-        return result
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    names = list(manifest.get("shard_order", []))
-    base = manifest_path.parent / pair_subdir
-    missing = [str(base / name) for name in names if not (base / name).is_file()]
-    result.update({
-        "shards": len(names),
-        "pair_dir": str(base),
-        "missing_shards": missing[:20],
-        "ok": bool(names) and not missing,
-    })
-    return result
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Check CUDA, BF16, shared artifacts, and optionally ByT5 forward pass.")
-    parser.add_argument("--config", default="configs/neural/byt5_l40s_short_pilot.json")
-    parser.add_argument("--load-model", action="store_true", help="Download/load ByT5 and execute a small BF16 CUDA forward pass.")
-    parser.add_argument("--allow-training-only", action="store_true", help="Do not fail if threshold/final artifacts are not ready yet.")
     parser.add_argument("--output", default="artifacts/byt5-preflight.json")
     args = parser.parse_args()
 
@@ -94,3 +62,52 @@ def main() -> None:
             max_length=int(training.get("max_length", config.get("max_length", 512))),
             device=str(training.get("device", "cuda")),
         )
+        seed_everything(int(training.get("seed", 42)))
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(0)
+        adapter = get_adapter_class(adapter_type).from_config(adapter_config, execute=True)
+        adapter.to_device(str(training.get("device", "cuda")))
+        adapter.model.eval()
+        rows = [
+            {
+                "name_a": "Café Shree & Sons Pvt Ltd",
+                "address_a": "12 MG Road, Ahmedabad 380001",
+                "country_a": "India",
+                "name_b": "Cafe Shree and Sons Private Limited",
+                "address_b": "12 M.G. Rd Ahmedabad 380001",
+                "country_b": "India",
+            },
+            {
+                "name_a": "München Handel GmbH",
+                "address_a": "Hauptstraße 7",
+                "country_a": "Germany",
+                "name_b": "Munchen Handel GMBH",
+                "address_b": "Hauptstrasse 7",
+                "country_b": "Germany",
+            },
+        ]
+        batch = adapter.collate(rows)
+        dtype = torch.bfloat16 if str(training.get("precision", "")).lower() == "bf16" else torch.float32
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=dtype, enabled=dtype == torch.bfloat16):
+            logits = adapter.logits(batch)
+        if tuple(logits.shape) != (2, 2) or not torch.isfinite(logits).all():
+            hard_failures.append(f"ByT5 forward sanity failed: shape={tuple(logits.shape)}")
+        result["model_check"] = {
+            "logits_shape": list(logits.shape),
+            "truncated": int(batch["truncated"]),
+            "peak_allocated_gb": torch.cuda.max_memory_allocated(0) / (1024 ** 3),
+            "peak_reserved_gb": torch.cuda.max_memory_reserved(0) / (1024 ** 3),
+        }
+
+    result["ok"] = not hard_failures
+    result["failures"] = hard_failures
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if hard_failures:
+        raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    main()

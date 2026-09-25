@@ -111,3 +111,4 @@ venv/
 artifacts/
 audit_report/
 docs/
+audit_output/
