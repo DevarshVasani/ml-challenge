@@ -136,6 +136,16 @@ Run metric self-check:
 python3 src/evaluate.py --check
 ```
 
+## Neural baseline infrastructure
+
+Shared, label-safe pair contracts, reusable candidate indexes, grouped Parquet
+shards, SQLite source joins, fake-adapter smoke training, resumable scoring,
+threshold evaluation, and streaming export are provided for the future GPU
+baselines. Start with the [GPU runbook](docs/neural_gpu_runbook.md) and the
+[adapter contract](docs/neural_adapter_contract.md). All new expensive
+commands require `--execute`; `--dry-run` and `--help` do not load models or
+iterate the competition dataset.
+
 ---
 
 ## 🧪 Testing

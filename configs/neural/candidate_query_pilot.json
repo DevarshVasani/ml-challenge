@@ -1,0 +1,17 @@
+{
+  "s1": "student_resource/dataset/train/train_source1.tsv",
+  "query_manifest": "artifacts/neural-data/query_manifest.json",
+  "query_subset": "all",
+  "index_root": "artifacts/candidate-index",
+  "indexes": {
+    "S2:business_name": "S2_business_name",
+    "S2:business_address": "S2_business_address",
+    "S3:business_name": "S3_business_name",
+    "S3:business_address": "S3_business_address"
+  },
+  "query_batch_size": 2048,
+  "shard_target_rows": 75000,
+  "strict_country": false,
+  "preserve_missing_country": true,
+  "output_dir": "artifacts/neural-candidates"
+}

@@ -1,0 +1,12 @@
+{
+  "query_manifest": "artifacts/test-neural-data/query_manifest.json",
+  "query_subset": "test",
+  "scores": "artifacts/test-predictions-selected-model",
+  "candidates": "artifacts/test-neural-data/test_pairs",
+  "source_registry": {
+    "S2": "student_resource/dataset/test/test_source2.tsv",
+    "S3": "student_resource/dataset/test/test_source3.tsv"
+  },
+  "threshold": 0.5,
+  "output_dir": "output/neural-selected-model"
+}

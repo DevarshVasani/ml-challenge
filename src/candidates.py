@@ -12,7 +12,26 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sparse_dot_topn import sp_matmul_topn
+try:
+    from sparse_dot_topn import sp_matmul_topn
+except ImportError:  # Keep tiny CPU/offline checks usable without optional native wheels.
+    def sp_matmul_topn(A, B, top_n, threshold=0.0, sort=True, n_threads=1):
+        product = (A @ B).tocsr()
+        rows = []
+        for row in range(product.shape[0]):
+            start, end = product.indptr[row], product.indptr[row + 1]
+            indices = product.indices[start:end]
+            values = product.data[start:end]
+            keep = np.flatnonzero(values > threshold)
+            order = keep[np.argsort(values[keep])[::-1][:top_n]] if len(keep) else keep
+            rows.append((indices[order], values[order]))
+        from scipy.sparse import csr_matrix
+        data = np.concatenate([value for _, value in rows]) if rows else np.array([], dtype=float)
+        indices = np.concatenate([index for index, _ in rows]) if rows else np.array([], dtype=int)
+        indptr = np.zeros(product.shape[0] + 1, dtype=int)
+        for row, (index, _) in enumerate(rows):
+            indptr[row + 1] = indptr[row] + len(index)
+        return csr_matrix((data, indices, indptr), shape=product.shape)
 
 from .evaluate import evaluate_predictions
 from .text_utils import normalize_text
@@ -156,15 +175,19 @@ def union_candidates(channels: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
         item = frame.copy()
         item["retrieved_by_name"] = int("name" in channel_name)
         item["retrieved_by_address"] = int("address" in channel_name)
-        item["name_tfidf_score"] = item["score"] if "name" in channel_name else 0.0
-        item["address_tfidf_score"] = item["score"] if "address" in channel_name else 0.0
-        item["name_rank"] = item["rank"] if "name" in channel_name else 0
-        item["address_rank"] = item["rank"] if "address" in channel_name else 0
+        item["retrieval_provenance"] = item.get("retrieval_provenance", "tfidf")
+        is_exact = item["retrieval_provenance"].astype(str).eq("exact") | ("exact" in channel_name)
+        item["retrieved_by_exact"] = is_exact.astype(int)
+        item["name_tfidf_score"] = item["score"].where(("name" in channel_name) & ~is_exact, 0.0)
+        item["address_tfidf_score"] = item["score"].where(("address" in channel_name) & ~is_exact, 0.0)
+        item["name_rank"] = item["rank"].where(("name" in channel_name) & ~is_exact, 0)
+        item["address_rank"] = item["rank"].where(("address" in channel_name) & ~is_exact, 0)
         parts.append(item)
     output_columns = [
         "source1_entity_id", "candidate_entity_id", "candidate_source",
         "name_tfidf_score", "address_tfidf_score", "name_rank", "address_rank",
         "retrieved_by_name", "retrieved_by_address", "retrieval_score",
+        "retrieved_by_exact", "retrieval_provenance",
     ]
     if not parts:
         return pd.DataFrame(columns=output_columns)
@@ -188,7 +211,9 @@ def union_candidates(channels: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
             "address_rank": int(address_ranks[address_ranks > 0].min()) if (address_ranks > 0).any() else 0,
             "retrieved_by_name": int(group["retrieved_by_name"].max()),
             "retrieved_by_address": int(group["retrieved_by_address"].max()),
-            "retrieval_score": float(max(name_scores.max(), address_scores.max())),
+            "retrieved_by_exact": int(group["retrieved_by_exact"].max()),
+            "retrieval_provenance": ",".join(sorted(set(group["retrieval_provenance"].astype(str)))),
+            "retrieval_score": float(max(name_scores.max(), address_scores.max(), 1.0 if int(group["retrieved_by_exact"].max()) else 0.0)),
         })
     return pd.DataFrame(rows, columns=output_columns)
 
@@ -289,6 +314,20 @@ def candidate_diagnostics(candidates: pd.DataFrame, s1: pd.DataFrame, s2: pd.Dat
         found = [(sid, cid) for sid, cid in pairs if cid in candidate_sets.get(sid, set())]
         by_country[country] = {"retrieved": len(found), "total": len(pairs), "recall": len(found) / len(pairs) if pairs else 1.0}
     report["candidate_recall_by_country"] = by_country
+    by_match_count: dict[str, Any] = {}
+    for label, predicate in {
+        "singleton": lambda count: count == 0,
+        "one": lambda count: count == 1,
+        "two_or_three": lambda count: 2 <= count <= 3,
+        "four_plus": lambda count: count >= 4,
+    }.items():
+        subset_ids = {sid for sid, values in ground_truth.items() if predicate(len(list(values)))}
+        pairs = [(sid, cid) for sid, cid in gt_pairs if sid in subset_ids]
+        found = [(sid, cid) for sid, cid in pairs if cid in candidate_sets.get(sid, set())]
+        oracle_subset = {sid: [cid for cid in ground_truth[sid] if cid in candidate_sets.get(sid, set())] for sid in subset_ids}
+        oracle_score = evaluate_predictions({sid: ground_truth[sid] for sid in subset_ids}, oracle_subset)["macro_f05"] if subset_ids else 1.0
+        by_match_count[label] = {"queries": len(subset_ids), "retrieved": len(found), "total": len(pairs), "recall": len(found) / len(pairs) if pairs else 1.0, "oracle_macro_f05": float(oracle_score)}
+    report["candidate_recall_by_match_count"] = by_match_count
     oracle = {sid: [cid for cid in ids if cid in candidate_sets.get(sid, set())] for sid, ids in ground_truth.items()}
     oracle_metrics = evaluate_predictions(dict(ground_truth), oracle)
     report["oracle_macro_f05"] = float(oracle_metrics["macro_f05"])
@@ -296,11 +335,38 @@ def candidate_diagnostics(candidates: pd.DataFrame, s1: pd.DataFrame, s2: pd.Dat
     return report
 
 
+def prune_candidates(candidates: pd.DataFrame, total_budget: int | None, *, exact_overflow: str = "allow") -> pd.DataFrame:
+    """Cheap deterministic final pruning; disabled when ``total_budget`` is None.
+
+    Exact matches are never silently discarded. If they alone exceed the
+    budget, ``exact_overflow='allow'`` emits the full exact set and reports an
+    over-budget group through downstream diagnostics.
+    """
+    if total_budget is None:
+        return candidates.copy()
+    if total_budget <= 0:
+        raise ValueError("total_budget must be positive or null")
+    if exact_overflow not in {"allow", "error"}:
+        raise ValueError("exact_overflow must be 'allow' or 'error'")
+    parts = []
+    for _, group in candidates.groupby("source1_entity_id", sort=False):
+        exact_mask = group.get("retrieved_by_exact", pd.Series(0, index=group.index)).astype(int).eq(1)
+        exact = group[exact_mask]
+        if len(exact) > total_budget and exact_overflow == "error":
+            raise ValueError(f"exact-match expansion exceeds total budget for {group.iloc[0]['source1_entity_id']}")
+        remaining = max(0, total_budget - len(exact))
+        other = group[~exact_mask].copy()
+        other["_score"] = pd.to_numeric(other.get("retrieval_score", 0.0), errors="coerce").fillna(0.0)
+        other = other.sort_values(["_score", "candidate_source", "candidate_entity_id"], ascending=[False, True, True]).head(remaining).drop(columns="_score")
+        parts.append(pd.concat([exact, other], ignore_index=True))
+    return pd.concat(parts, ignore_index=True) if parts else candidates.iloc[:0].copy()
+
+
 def save_candidates(candidates: pd.DataFrame, output: str | Path) -> None:
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    columns = ["source1_entity_id", "candidate_entity_id", "candidate_source", "name_tfidf_score", "address_tfidf_score", "name_rank", "address_rank", "retrieved_by_name", "retrieved_by_address", "retrieval_score"]
-    candidates.reindex(columns=columns).to_csv(output, sep="\t", index=False)
+    columns = ["source1_entity_id", "candidate_entity_id", "candidate_source", "name_tfidf_score", "address_tfidf_score", "name_rank", "address_rank", "retrieved_by_name", "retrieved_by_address", "retrieved_by_exact", "retrieval_provenance", "retrieval_score"]
+    candidates.reindex(columns=[column for column in columns if column in candidates.columns]).to_csv(output, sep="\t", index=False)
 
 
 def main() -> None:

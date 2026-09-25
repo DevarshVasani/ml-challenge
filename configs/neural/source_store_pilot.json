@@ -1,0 +1,9 @@
+{
+  "sources": {
+    "S1": "student_resource/dataset/train/train_source1.tsv",
+    "S2": "student_resource/dataset/train/train_source2.tsv",
+    "S3": "student_resource/dataset/train/train_source3.tsv"
+  },
+  "batch_size": 10000,
+  "output": "artifacts/source-store.sqlite"
+}

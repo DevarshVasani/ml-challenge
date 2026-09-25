@@ -1,0 +1,16 @@
+{
+  "paths": {
+    "s1": "student_resource/dataset/train/train_source1.tsv",
+    "s2": "student_resource/dataset/train/train_source2.tsv",
+    "s3": "student_resource/dataset/train/train_source3.tsv",
+    "ground_truth": "student_resource/dataset/train/train_ground_truth.tsv"
+  },
+  "query_manifest": "artifacts/neural-data/query_manifest.json",
+  "query_subset": "threshold",
+  "source_index_location": "artifacts/candidate-index",
+  "seed": 42,
+  "k_values": [20, 40, 80],
+  "total_budgets": [20, 40, 80],
+  "exact_overflow": "allow",
+  "output": "artifacts/c-experiments/k_tuning_report.json"
+}

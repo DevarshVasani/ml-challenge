@@ -1,0 +1,16 @@
+{
+  "seed": 42,
+  "data": {
+    "s1": "student_resource/dataset/train/train_source1.tsv",
+    "s2": "student_resource/dataset/train/train_source2.tsv",
+    "s3": "student_resource/dataset/train/train_source3.tsv",
+    "ground_truth": "student_resource/dataset/train/train_ground_truth.tsv",
+    "folds": "artifacts/folds.tsv"
+  },
+  "queries": {"train": 50000, "train_folds": [1, 2], "heldout": 5000, "heldout_fold": 0, "threshold": 2500},
+  "source_pool_policy": "full verified retrieval background; labels only select training pairs",
+  "source_store": "artifacts/source-store.sqlite",
+  "candidate_dir": "artifacts/neural-candidates",
+  "shard_target_rows": 75000,
+  "output_dir": "artifacts/neural-data"
+}

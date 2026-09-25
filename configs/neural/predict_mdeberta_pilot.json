@@ -1,0 +1,12 @@
+{
+  "adapter_type": "mdeberta",
+  "checkpoint": "artifacts/neural-mdeberta",
+  "pair_manifest": "artifacts/neural-data/final_pairs_manifest.json",
+  "pair_subdir": "final_pairs",
+  "candidate_manifest": "artifacts/neural-candidates/manifest.json",
+  "query_manifest": "artifacts/neural-data/query_manifest.json",
+  "query_subset": "final",
+  "batch_size": 32,
+  "device": "cuda",
+  "output_dir": "artifacts/predictions-mdeberta-final"
+}

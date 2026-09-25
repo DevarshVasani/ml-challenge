@@ -1,0 +1,11 @@
+{
+  "top_k": 100,
+  "query_batch_size": 2048,
+  "memory_budget_mb": 4096,
+  "max_vocabulary": 500000,
+  "sources": {
+    "S2": {"path": "student_resource/dataset/train/train_source2.tsv", "fields": ["business_name", "business_address"]},
+    "S3": {"path": "student_resource/dataset/train/train_source3.tsv", "fields": ["business_name", "business_address"]}
+  },
+  "output_dir": "artifacts/candidate-index"
+}

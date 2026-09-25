@@ -1,0 +1,5 @@
+# Optional future compute-machine pins. Compatibility is intentionally unverified here.
+# Install a CUDA-matched torch build from https://pytorch.org/get-started/locally/
+torch>=2.2,<3
+transformers>=4.40,<5
+tokenizers>=0.19,<1
