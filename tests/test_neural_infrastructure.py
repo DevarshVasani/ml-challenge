@@ -14,6 +14,7 @@ from src.neural_data import read_text_tsv, select_query_ids, select_training_pai
 from src.neural_models import NeuralTrainingConfig, evaluate_scores, load_training_state, predict_pairs, save_checkpoint, train_neural
 from src.predict_neural import execute as execute_prediction
 from src.source_store import SourceStore, make_pair_group
+from src.train_neural import load_config, plan
 
 
 def _pair(sid="S1-1", cid="S2-1", source="S2", label=0):
@@ -57,6 +58,19 @@ def test_group_carry_and_writer_never_splits_s1(tmp_path):
     for group in groups: writer.write_group(group)
     writer.close()
     assert len(writer.files) == 2
+
+
+def test_pilot_configs_target_cuda_without_dry_run_execution():
+    for name, adapter_type in (
+        ("mdeberta_pilot.json", "mdeberta"),
+        ("byt5_pilot.json", "byt5"),
+    ):
+        config = load_config(Path("configs/neural") / name)
+        planned = plan(config)
+        assert planned["adapter_type"] == adapter_type
+        assert planned["device"] == "cuda"
+        assert planned["model_initialization"] == "deferred"
+        assert planned["dataset_iteration"] == "deferred"
 
 
 def test_fake_adapter_training_prediction_and_export(tmp_path):
@@ -146,4 +160,3 @@ def test_prediction_shard_resume_and_input_invalidation(tmp_path):
     changed.to_parquet(pair_path, index=False)
     with pytest.raises(ValueError, match="identity changed"):
         execute_prediction(config)
-

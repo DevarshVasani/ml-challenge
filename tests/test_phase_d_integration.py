@@ -2,6 +2,7 @@ import json
 
 import joblib
 import pandas as pd
+import pytest
 
 from src.artifact_contract import validate_candidate_frame
 from src.candidate_io import iter_candidate_partitions
@@ -61,6 +62,34 @@ def test_contract_parquet_context_and_sampling_are_deterministic(tmp_path):
     assert len(sampled[sampled.source1_entity_id == "S1-1"]) == 3
     excluded = training_rows_for_fold(labelled, validation_fold=0, negatives_per_s1=1)
     assert not ((excluded.source1_fold == 0) | (excluded.candidate_fold == 0)).any()
+
+
+def test_candidate_partitions_reassemble_tsv_chunks_and_reject_repeats(tmp_path):
+    frame = _candidates()
+    path = tmp_path / "candidates.tsv"
+    frame.to_csv(path, sep="\t", index=False)
+
+    partitions = list(iter_candidate_partitions(path, batch_size=2))
+    assert [len(part) for part in partitions] == [3, 1, 2]
+    assert [part.source1_entity_id.iloc[0] for part in partitions] == ["S1-1", "S1-2", "S1-3"]
+
+    repeated = pd.concat([frame, frame.iloc[:1]], ignore_index=True)
+    repeated_path = tmp_path / "repeated.tsv"
+    repeated.to_csv(repeated_path, sep="\t", index=False)
+    with pytest.raises(ValueError, match="non-contiguous"):
+        list(iter_candidate_partitions(repeated_path, batch_size=2))
+
+
+def test_candidate_partitions_reassemble_parquet_batches_and_files(tmp_path):
+    first = tmp_path / "01.parquet"
+    second = tmp_path / "02.parquet"
+    frame = _candidates()
+    frame.iloc[:4].to_parquet(first, index=False)
+    frame.iloc[3:].to_parquet(second, index=False)
+
+    partitions = list(iter_candidate_partitions(tmp_path, batch_size=1))
+    assert [len(part) for part in partitions] == [3, 2, 2]
+    assert [part.source1_entity_id.iloc[0] for part in partitions] == ["S1-1", "S1-2", "S1-3"]
 
 
 def test_fold_fallback_and_batch_inference_output_validation(tmp_path):

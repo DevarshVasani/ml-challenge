@@ -21,7 +21,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 def plan(config: dict[str, Any]) -> dict[str, Any]:
     training = config.get("training", config)
-    return {"command": "train_neural", "adapter_type": training.get("adapter_type", config.get("adapter_type")), "execute_required": True, "model_initialization": "deferred", "dataset_iteration": "deferred", "precision": training.get("precision", "fp32"), "max_steps": training.get("max_steps")}
+    return {"command": "train_neural", "adapter_type": training.get("adapter_type", config.get("adapter_type")), "execute_required": True, "model_initialization": "deferred", "dataset_iteration": "deferred", "precision": training.get("precision", "fp32"), "device": training.get("device", "cpu"), "max_steps": training.get("max_steps")}
 
 
 def _pair_inputs(config: dict[str, Any], training: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
