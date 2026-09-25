@@ -1,3 +1,35 @@
+"""Preflight checks before spending GPU time on the ByT5 baseline."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+from pathlib import Path
+
+
+def _pair_manifest_check(manifest_path: Path, pair_subdir: str) -> dict:
+    result = {"path": str(manifest_path), "exists": manifest_path.is_file(), "ok": False}
+    if not manifest_path.is_file():
+        return result
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    names = list(manifest.get("shard_order", []))
+    base = manifest_path.parent / pair_subdir
+    missing = [str(base / name) for name in names if not (base / name).is_file()]
+    result.update({
+        "shards": len(names),
+        "pair_dir": str(base),
+        "missing_shards": missing[:20],
+        "ok": bool(names) and not missing,
+    })
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Check CUDA, BF16, shared artifacts, and optionally ByT5 forward pass.")
+    parser.add_argument("--config", default="configs/neural/byt5_l40s_short_pilot.json")
+    parser.add_argument("--load-model", action="store_true", help="Download/load ByT5 and execute a small BF16 CUDA forward pass.")
+    parser.add_argument("--allow-training-only", action="store_true", help="Do not fail if threshold/final artifacts are not ready yet.")
     parser.add_argument("--output", default="artifacts/byt5-preflight.json")
     args = parser.parse_args()
 

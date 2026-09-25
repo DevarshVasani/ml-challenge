@@ -1,3 +1,67 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from src.neural_adapters.base import AdapterConfig, serialize_pair_fields
+from src.neural_adapters.byt5 import ByT5EncoderPairAdapter, _build_pair_classifier, _masked_mean_pool
+
+
+def _row(**overrides):
+    value = {
+        "name_a": "Café A",
+        "address_a": "001 Main St",
+        "country_a": "France",
+        "name_b": "Cafe A",
+        "address_b": "001 Main Street",
+        "country_b": "France",
+    }
+    value.update(overrides)
+    return value
+
+
+class _ByteTokenizer:
+    pad_token_id = 0
+    eos_token_id = 1
+
+    def __call__(self, texts, *, add_special_tokens=True, padding=False, truncation=False, return_attention_mask=False):
+        del padding, truncation, return_attention_mask
+        single = isinstance(texts, str)
+        values = [texts] if single else list(texts)
+        encoded = []
+        for text in values:
+            ids = [byte + 3 for byte in text.encode("utf-8")]
+            if add_special_tokens:
+                ids.append(self.eos_token_id)
+            encoded.append(ids)
+        return {"input_ids": encoded[0] if single else encoded}
+
+    def pad(self, encoded, *, padding=True, return_attention_mask=True, return_tensors="pt"):
+        del padding, return_attention_mask
+        assert return_tensors == "pt"
+        torch = pytest.importorskip("torch")
+        rows = encoded["input_ids"]
+        width = max(len(row) for row in rows)
+        input_ids = torch.full((len(rows), width), self.pad_token_id, dtype=torch.long)
+        attention_mask = torch.zeros((len(rows), width), dtype=torch.long)
+        for index, row in enumerate(rows):
+            input_ids[index, : len(row)] = torch.tensor(row, dtype=torch.long)
+            attention_mask[index, : len(row)] = 1
+        return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+
+def test_serialization_uses_only_shared_fields_in_order():
+    row = _row(candidate_entity_id="secret-id", label=1, source1_fold=7)
+    serialized = serialize_pair_fields(row)
+    assert serialized == "Café A || 001 Main St || France || Cafe A || 001 Main Street || France"
+    assert "secret-id" not in serialized
+    assert "7" not in serialized
+
+
+def test_adapter_constructor_is_network_free():
+    adapter = ByT5EncoderPairAdapter(AdapterConfig("byt5", checkpoint="google/byt5-small", max_length=64))
+    assert adapter.model is None
     assert adapter.tokenizer is None
 
 
