@@ -146,6 +146,33 @@ baselines. Start with the [GPU runbook](docs/neural_gpu_runbook.md) and the
 commands require `--execute`; `--dry-run` and `--help` do not load models or
 iterate the competition dataset.
 
+### Preparation status and environment
+
+These bounded commands inspect metadata only; they do not scan datasets, unpickle indexes,
+initialize CUDA, or download models:
+
+```bash
+python -m src.environment_status --artifact-dir artifacts --config configs/neural/data_pilot.json
+python -m src.preprocess_status --config configs/neural/index_pilot.json
+python -m src.prepare_neural_data --config configs/neural/data_pilot.json --execute --queries-only
+```
+
+Preparation defaults are deliberately conservative: one index worker, two sparse threads,
+128 query rows per batch, and 75,000 rows per output shard. On 16 GB RAM, keep one worker
+and use the sequential/disk-backed workflow; on 32–64 GB RAM, increase only after measuring
+peak RSS and disk throughput. VRAM is not used by indexing or source-store preparation.
+Do not run the competition-scale ladder during development: validate metadata first, then
+bootstrap 500–1,000 queries, measure residency/time/peak RSS, and project larger runs.
+
+Candidate querying is resumable and channel-sequential. It writes
+`output/channel_manifest.json` after every durable channel batch (including empty batches),
+then merges only verified-complete coverage into grouped Parquet shards. Re-running with
+`"resume": true` skips completed channel batches. For oversized exact-match maps, build the
+bounded SQLite fallback; duplicate normalized keys are retained and queried in bounded SQL
+`IN` chunks. The default TF-IDF backend spills exact global corpus counts to SQLite and
+stores query-ready sparse shards as memory-mapped arrays. Legacy pickle indexes remain eager
+and require enough system RAM for explicit validation/conversion.
+
 ---
 
 ## 🧪 Testing

@@ -11,6 +11,16 @@
   "source_pool_policy": "full verified retrieval background; labels only select training pairs",
   "source_store": "artifacts/source-store.sqlite",
   "candidate_dir": "artifacts/neural-candidates",
+  "index_workers": 1,
+  "sparse_threads": 2,
+  "memory_limit_mb": 4096,
+  "disk_limit_gb": 200,
+  "query_batch_size": 128,
+  "source_read_chunk_rows": 25000,
+  "pair_join_target_rows": 25000,
+  "bootstrap_train_queries": 1000,
+  "resume": true,
+  "strict_country": false,
   "shard_target_rows": 75000,
   "output_dir": "artifacts/neural-data"
 }

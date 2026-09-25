@@ -178,6 +178,7 @@ def union_candidates(channels: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
         item["retrieval_provenance"] = item.get("retrieval_provenance", "tfidf")
         is_exact = item["retrieval_provenance"].astype(str).eq("exact") | ("exact" in channel_name)
         item["retrieved_by_exact"] = is_exact.astype(int)
+        item["frequent_key_expansion"] = pd.to_numeric(item.get("frequent_key_expansion", 0), errors="coerce").fillna(0).astype(int) if "frequent_key_expansion" in item else 0
         item["name_tfidf_score"] = item["score"].where(("name" in channel_name) & ~is_exact, 0.0)
         item["address_tfidf_score"] = item["score"].where(("address" in channel_name) & ~is_exact, 0.0)
         item["name_rank"] = item["rank"].where(("name" in channel_name) & ~is_exact, 0)
@@ -187,35 +188,31 @@ def union_candidates(channels: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
         "source1_entity_id", "candidate_entity_id", "candidate_source",
         "name_tfidf_score", "address_tfidf_score", "name_rank", "address_rank",
         "retrieved_by_name", "retrieved_by_address", "retrieval_score",
-        "retrieved_by_exact", "retrieval_provenance",
+        "retrieved_by_exact", "retrieval_provenance", "frequent_key_expansion",
     ]
     if not parts:
         return pd.DataFrame(columns=output_columns)
     combined = pd.concat(parts, ignore_index=True)
-    rows: list[dict[str, Any]] = []
-    for keys, group in combined.groupby(
-        ["source1_entity_id", "candidate_source", "candidate_entity_id"],
-        sort=False,
-        dropna=False,
-    ):
-        source1_id, candidate_source, candidate_id = keys
-        name_scores = pd.to_numeric(group["name_tfidf_score"], errors="coerce").fillna(0.0)
-        address_scores = pd.to_numeric(group["address_tfidf_score"], errors="coerce").fillna(0.0)
-        name_ranks = pd.to_numeric(group["name_rank"], errors="coerce").fillna(0)
-        address_ranks = pd.to_numeric(group["address_rank"], errors="coerce").fillna(0)
-        rows.append({
-            "source1_entity_id": str(source1_id), "candidate_entity_id": str(candidate_id),
-            "candidate_source": str(candidate_source),
-            "name_tfidf_score": float(name_scores.max()), "address_tfidf_score": float(address_scores.max()),
-            "name_rank": int(name_ranks[name_ranks > 0].min()) if (name_ranks > 0).any() else 0,
-            "address_rank": int(address_ranks[address_ranks > 0].min()) if (address_ranks > 0).any() else 0,
-            "retrieved_by_name": int(group["retrieved_by_name"].max()),
-            "retrieved_by_address": int(group["retrieved_by_address"].max()),
-            "retrieved_by_exact": int(group["retrieved_by_exact"].max()),
-            "retrieval_provenance": ",".join(sorted(set(group["retrieval_provenance"].astype(str)))),
-            "retrieval_score": float(max(name_scores.max(), address_scores.max(), 1.0 if int(group["retrieved_by_exact"].max()) else 0.0)),
-        })
-    return pd.DataFrame(rows, columns=output_columns)
+    keys = ["source1_entity_id", "candidate_source", "candidate_entity_id"]
+    grouped = combined.groupby(keys, sort=False, dropna=False)
+    result = grouped.agg(
+        name_tfidf_score=("name_tfidf_score", "max"),
+        address_tfidf_score=("address_tfidf_score", "max"),
+        retrieved_by_name=("retrieved_by_name", "max"),
+        retrieved_by_address=("retrieved_by_address", "max"),
+        retrieved_by_exact=("retrieved_by_exact", "max"),
+        frequent_key_expansion=("frequent_key_expansion", "max"),
+        retrieval_provenance=("retrieval_provenance", lambda values: ",".join(sorted(set(map(str, values))))),
+    ).reset_index()
+    for column in ("name_tfidf_score", "address_tfidf_score"):
+        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0.0)
+    for column in ("name_rank", "address_rank"):
+        # Zero is the missing-rank sentinel; min must ignore it.
+        ranked = combined[column].where(pd.to_numeric(combined[column], errors="coerce").fillna(0) > 0)
+        result[column] = ranked.groupby([combined[key] for key in keys], sort=False).min().fillna(0).astype(int).to_numpy()
+    result["retrieval_score"] = result[["name_tfidf_score", "address_tfidf_score"]].max(axis=1)
+    result.loc[result["retrieved_by_exact"].astype(bool), "retrieval_score"] = result.loc[result["retrieved_by_exact"].astype(bool), "retrieval_score"].clip(lower=1.0)
+    return result[output_columns]
 
 
 def retrieve_exact(s1: pd.DataFrame, source: pd.DataFrame, field: str, label: str) -> pd.DataFrame:

@@ -1,20 +1,26 @@
 """Small offline contract tests; no competition files or model downloads."""
 
 from pathlib import Path
+import json
 
 import pandas as pd
+import numpy as np
 import pytest
 
 from src.candidate_io import GroupedParquetWriter, iter_complete_groups
-from src.candidate_index import IndexConfig, SourceTfidfIndex
+from src.candidate_index import DiskBackedTfidfIndex, IndexConfig, SourceTfidfIndex, SqliteExactMatchIndex, run_resumable_channel_query, validate_channel_coverage
 from src.export import export_streaming_shards
 from src.neural_adapters import AdapterConfig, FakePairAdapter
 from src.neural_contracts import validate_pair_frame, validate_prediction_frame
+from src.neural_contracts import file_identity
 from src.neural_data import read_text_tsv, select_query_ids, select_training_pairs, stable_unmatched_fold
+from src.neural_diagnostics import RetrievalDiagnostics
 from src.neural_models import NeuralTrainingConfig, evaluate_scores, load_training_state, predict_pairs, save_checkpoint, train_neural
 from src.predict_neural import execute as execute_prediction
+from src.prepare_neural_data import execute as execute_preparation
 from src.source_store import SourceStore, make_pair_group
 from src.train_neural import load_config, plan
+from src.fold_lookup import fold_for_entity
 
 
 def _pair(sid="S1-1", cid="S2-1", source="S2", label=0):
@@ -45,6 +51,138 @@ def test_index_reuse_and_identity_invalidation(tmp_path):
     assert loaded.query(query, candidate_source="S2").equals(index.query(query, candidate_source="S2"))
     with pytest.raises(ValueError):
         SourceTfidfIndex.load(tmp_path / "index", expected_config=config, expected_source_identity={"version": 2})
+
+
+def test_disk_tfidf_matches_legacy_on_tiny_shards(tmp_path):
+    source = pd.DataFrame({"entity_id": ["S2-01", "S2-02", "S2-03"], "business_name": ["Café Bleu", "Other Shop", "Café Bleu"]})
+    query = pd.DataFrame({"entity_id": ["S1-a", "S1-b"], "business_name": ["cafe bleu", "other"]})
+    config = IndexConfig("business_name", top_k=3, batch_size=1)
+    legacy = SourceTfidfIndex(source, config)
+    disk = DiskBackedTfidfIndex.build(source, tmp_path / "disk", config, candidate_source="S2", source_chunk_rows=1)
+    expected = legacy.query(query, candidate_source="S2").sort_values(["source1_entity_id", "candidate_entity_id"]).reset_index(drop=True)
+    actual = disk.query(query).sort_values(["source1_entity_id", "candidate_entity_id"]).reset_index(drop=True)
+    assert expected[["source1_entity_id", "candidate_entity_id"]].equals(actual[["source1_entity_id", "candidate_entity_id"]])
+    assert np.allclose(expected.score.to_numpy(), actual.score.to_numpy(), atol=1e-6)
+
+
+def test_streamed_global_idf_build_matches_single_reference_and_uses_mmaps(tmp_path):
+    source = pd.DataFrame({"entity_id": ["S2-1", "S2-2", "S2-3", "S2-4"], "business_name": ["alpha cafe", "alpha shop", "beta cafe", "gamma"]})
+    source_path = tmp_path / "source.tsv"
+    source.to_csv(source_path, sep="\t", index=False)
+    query = pd.DataFrame({"entity_id": ["S1-1", "S1-2"], "business_name": ["alpha", "cafe"]})
+    config = IndexConfig("business_name", top_k=4, batch_size=1)
+    reference = SourceTfidfIndex(source, config).query(query, candidate_source="S2").sort_values(["source1_entity_id", "candidate_entity_id"]).reset_index(drop=True)
+    disk = DiskBackedTfidfIndex.build_from_tsv(source_path, tmp_path / "streamed", config, candidate_source="S2", source_identity=file_identity(source_path, hash_content=True), source_chunk_rows=1)
+    actual = disk.query(query).sort_values(["source1_entity_id", "candidate_entity_id"]).reset_index(drop=True)
+    assert reference[["source1_entity_id", "candidate_entity_id"]].equals(actual[["source1_entity_id", "candidate_entity_id"]])
+    assert np.allclose(reference.score, actual.score, atol=1e-6)
+    assert not hasattr(disk, "shards")
+    assert len(list((tmp_path / "streamed").glob("matrix-*-data.npy"))) == len(source)
+
+
+def test_channel_schedule_releases_each_loader_and_retries_corruption(tmp_path):
+    active = 0
+    maximum = 0
+    calls = []
+
+    class Loader:
+        def __init__(self, name):
+            self.name = name
+            self._index = None
+        def __call__(self, batch):
+            nonlocal active, maximum
+            if self._index is None:
+                self._index = object(); active += 1; maximum = max(maximum, active)
+            calls.append(self.name)
+            return pd.DataFrame(columns=["source1_entity_id", "candidate_entity_id", "candidate_source", "score", "rank"])
+        def close(self):
+            nonlocal active
+            if self._index is not None:
+                active -= 1
+            self._index = None
+
+    query = pd.DataFrame({"entity_id": ["S1-1", "S1-2"], "business_name": ["a", "b"]})
+    loaders = [("one", Loader("one")), ("two", Loader("two"))]
+    run_resumable_channel_query(query, loaders, tmp_path / "run", query_batch_size=1)
+    assert maximum == 1 and active == 0
+    channel_file = next((tmp_path / "run" / "channels" / "one").glob("*.parquet"))
+    channel_file.write_bytes(b"corrupt")
+    before = calls.count("one")
+    run_resumable_channel_query(query, loaders, tmp_path / "run", query_batch_size=1)
+    assert calls.count("one") == before + 1
+
+
+def test_unmatched_fold_policy_is_canonical():
+    for value in ("S2-x", "S3-y", "other"):
+        assert fold_for_entity(value, {}, 19, 3) == stable_unmatched_fold(value, seed=19, n_folds=3)
+
+
+def test_frozen_candidate_coverage_drives_resumable_pairs_and_bootstrap(tmp_path):
+    data = tmp_path / "data"; data.mkdir()
+    s1 = pd.DataFrame({"entity_id": ["S1-1", "S1-2", "S1-3"], "business_name": ["one", "two", "three"], "business_address": ["a", "b", "c"], "country": ["FR", "IN", "IN"]})
+    s2 = pd.DataFrame({"entity_id": ["S2-1", "S2-2"], "business_name": ["one", "two"], "business_address": ["a", "b"], "country": ["FR", "IN"]})
+    s3 = pd.DataFrame({"entity_id": ["S3-1"], "business_name": ["unused"], "business_address": ["z"], "country": ["US"]})
+    gt = pd.DataFrame({"source1_entity_id": ["S1-1", "S1-2", "S1-3"], "matched_entity_ids": ["S2-1", "S2-2", ""]})
+    folds = pd.DataFrame({"entity_id": ["S1-1", "S2-1", "S1-2", "S2-2", "S1-3"], "fold": [1, 1, 0, 0, 0]})
+    paths = {}
+    for name, frame in (("s1", s1), ("s2", s2), ("s3", s3), ("ground_truth", gt), ("folds", folds)):
+        paths[name] = str(data / f"{name}.tsv"); frame.to_csv(paths[name], sep="\t", index=False)
+    store_path = tmp_path / "source.sqlite"
+    SourceStore.build({"S1": paths["s1"], "S2": paths["s2"], "S3": paths["s3"]}, store_path, batch_size=1)
+    output = tmp_path / "neural"
+    candidate_root = tmp_path / "candidates"
+    config = {"seed": 5, "fold_seed": 5, "data": paths, "queries": {"train": 1, "train_folds": [1], "heldout": 2, "heldout_fold": 0, "threshold": 1}, "source_store": str(store_path), "candidate_dir": str(candidate_root), "bootstrap_train_queries": 1, "output_dir": str(output), "resume": True}
+    execute_preparation(config, queries_only=True)
+    frozen = json.loads((output / "query_manifest.json").read_text())
+    selected = [sid for subset in ("train", "threshold", "final") for sid in frozen["query_ids"][subset]]
+    ordered = s1.set_index("entity_id").loc[selected].reset_index()
+    positives = {"S1-1": "S2-1", "S1-2": "S2-2"}
+    def channel(batch):
+        rows = [{"source1_entity_id": sid, "candidate_entity_id": positives[sid], "candidate_source": "S2", "score": 1.0, "rank": 1} for sid in batch.entity_id if sid in positives]
+        return pd.DataFrame(rows, columns=["source1_entity_id", "candidate_entity_id", "candidate_source", "score", "rank"])
+    result = run_resumable_channel_query(ordered, [("S2_name", channel)], candidate_root, query_batch_size=1)
+    (candidate_root / "manifest.json").write_text(json.dumps({"completion": "complete", "query_ids": selected, "shard_order": [str(Path(value).relative_to(candidate_root)) for value in result["files"]]}), encoding="utf-8")
+    prepared = execute_preparation(config)
+    train_manifest = json.loads(Path(prepared["pair_manifests"]["train"]).read_text())
+    assert train_manifest["completion"] == "complete"
+    assert all((output / value).exists() for value in train_manifest["shard_order"])
+    assert (output / "bootstrap_pairs_manifest.json").exists()
+    assert execute_preparation(config)["reports"] == prepared["reports"]
+
+
+def test_resumable_channel_manifest_records_empty_batches_and_reuses_outputs(tmp_path):
+    s1 = pd.DataFrame({"entity_id": ["S1-1", "S1-2", "S1-3"], "business_name": ["Alpha", "", "Gamma"]})
+    calls = []
+    def channel(batch):
+        calls.append(batch.entity_id.tolist())
+        rows = [{"source1_entity_id": "S1-1", "candidate_entity_id": "S2-1", "candidate_source": "S2", "score": 1.0, "rank": 1}]
+        return pd.DataFrame(rows) if "S1-1" in set(batch.entity_id) else pd.DataFrame(columns=["source1_entity_id", "candidate_entity_id", "candidate_source", "score", "rank"])
+    first = run_resumable_channel_query(s1, [("name", channel)], tmp_path / "resume", query_batch_size=2)
+    assert len(calls) == 2
+    manifest = json.loads((tmp_path / "resume" / "channel_manifest.json").read_text())
+    validate_channel_coverage(manifest, s1.entity_id.tolist(), ["name"])
+    second = run_resumable_channel_query(s1, [("name", channel)], tmp_path / "resume", query_batch_size=2)
+    assert len(calls) == 2
+    assert second["files"] == first["files"]
+
+
+def test_sqlite_exact_index_preserves_duplicate_postings(tmp_path):
+    source = pd.DataFrame({"entity_id": ["S2-1", "S2-2"], "business_name": ["Same", "Same"]})
+    index = SqliteExactMatchIndex.build(source, tmp_path / "exact.db", "business_name", candidate_source="S2")
+    query = pd.DataFrame({"entity_id": ["S1-1"], "business_name": ["Same"]})
+    result = index.query(query)
+    assert result.candidate_entity_id.tolist() == ["S2-1", "S2-2"]
+
+
+def test_streaming_retrieval_diagnostics_include_zero_queries_and_singletons():
+    diagnostics = RetrievalDiagnostics({"S1-1": ["S2-1"], "S1-2": []})
+    diagnostics.add_query("S1-1", [{"candidate_entity_id": "S2-1", "retrieved_by_name": 1}])
+    diagnostics.add_query("S1-2", [])
+    report = diagnostics.report()
+    assert report["queries"] == 2
+    assert report["zero_candidate_queries"] == 1
+    assert report["recall"]["overall"] == 1.0
+    assert report["oracle_macro_f05"] == 1.0
 
 
 def test_group_carry_and_writer_never_splits_s1(tmp_path):

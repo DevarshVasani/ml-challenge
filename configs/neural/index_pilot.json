@@ -1,6 +1,11 @@
 {
   "top_k": 100,
-  "query_batch_size": 2048,
+  "index_backend": "disk_backed",
+  "index_workers": 1,
+  "sparse_threads": 2,
+  "query_batch_size": 128,
+  "source_read_chunk_rows": 25000,
+  "resume": true,
   "memory_budget_mb": 4096,
   "max_vocabulary": 500000,
   "sources": {
