@@ -1,93 +1,96 @@
-"""Diagnostic script for analyzing ByT5 truncation lengths and exact field cut locations."""
+"""Measure ByT5 byte-token lengths and where a 512-token budget cuts fields.
+
+This is a diagnostic only. It reuses the exact shared pair serializer and never
+changes candidate sets, labels, or query splits.
+"""
+
+from __future__ import annotations
 
 import argparse
 import json
-import logging
-from collections import Counter
+from array import array
+from collections import Counter, defaultdict
 from pathlib import Path
+from typing import Any, Iterable
 
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
-from src.neural_adapters.base import PAIR_TEXT_FIELDS, serialize_pair_fields
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+from src.neural_adapters.base import PAIR_SERIALIZATION_SEPARATOR, PAIR_TEXT_FIELDS, serialize_pair_fields
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Analyze truncation lengths for ByT5 serialization")
-    parser.add_argument("--pair-manifest", type=str, required=True, help="Path to pair manifest JSON")
-    parser.add_argument("--pair-dir", type=str, required=True, help="Path to pair parquet directory")
-    parser.add_argument("--checkpoint", type=str, default="google/byt5-small", help="Tokenizer checkpoint")
-    parser.add_argument("--max-length", type=int, default=512, help="Max byte length for ByT5")
-    parser.add_argument("--output", type=str, required=True, help="Path to output JSON report")
-    
+def _iter_batches(frame: pd.DataFrame, batch_size: int) -> Iterable[list[dict[str, Any]]]:
+    columns = list(PAIR_TEXT_FIELDS)
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"pair shard is missing text fields: {missing}")
+    for start in range(0, len(frame), batch_size):
+        yield frame.iloc[start : start + batch_size][columns].to_dict(orient="records")
+
+
+def _utf8_cut_location(row: dict[str, Any], content_budget: int) -> tuple[str, bool, bool]:
+    """Return exact serialized-field cut location for ByT5's raw UTF-8 content.
+
+    ``content_budget`` excludes the final EOS token. Separators are accounted for
+    explicitly. Address flags mean at least part of that address is unavailable
+    after truncation, including when truncation occurs before the field begins.
+    """
+    separator_bytes = len(PAIR_SERIALIZATION_SEPARATOR.encode("utf-8"))
+    cursor = 0
+    boundaries: dict[str, tuple[int, int]] = {}
+
+    for index, field in enumerate(PAIR_TEXT_FIELDS):
+        value = str(row.get(field, "") or "")
+        field_bytes = len(value.encode("utf-8"))
+        start, end = cursor, cursor + field_bytes
+        boundaries[field] = (start, end)
+        if content_budget < end:
+            location = field
+            break
+        cursor = end
+        if index < len(PAIR_TEXT_FIELDS) - 1:
+            separator_end = cursor + separator_bytes
+            if content_budget < separator_end:
+                location = f"separator_after_{field}"
+                break
+            cursor = separator_end
+    else:
+        location = "after_serialized_text"
+
+    address_a_end = boundaries.get("address_a", (0, 0))[1]
+    address_b_end = boundaries.get("address_b", (0, 0))[1]
+    address_a_affected = content_budget < address_a_end
+    address_b_affected = content_budget < address_b_end
+    return location, address_a_affected, address_b_affected
+
+
+def _manifest_shards(manifest_path: Path, pair_dir: Path) -> list[Path]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    names = list(manifest.get("shard_order", []))
+    if not names:
+        raise ValueError(f"pair manifest has no shard_order: {manifest_path}")
+    shards = [pair_dir / name for name in names]
+    missing = [str(path) for path in shards if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"pair manifest references missing shards: {missing[:5]}")
+    return shards
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Analyze ByT5 truncation on existing pair shards.")
+    parser.add_argument("--pair-manifest", required=True)
+    parser.add_argument("--pair-dir", required=True)
+    parser.add_argument("--checkpoint", default="google/byt5-small")
+    parser.add_argument("--revision", default=None)
+    parser.add_argument("--max-length", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--output", required=True)
     args = parser.parse_args()
-    
-    logging.info(f"Loading tokenizer from {args.checkpoint}")
-    tokenizer = AutoTokenizer.from_pretrained(args.checkpoint, use_fast=False)
-    
-    manifest = json.loads(Path(args.pair_manifest).read_text(encoding="utf-8"))
-    shards = manifest.get("shard_order", [])
-    if not shards:
-        shards = [p.name for p in Path(args.pair_dir).glob("*.parquet")]
-        
-    total_pairs = 0
-    truncated_pairs = 0
-    lengths = []
-    
-    # Counter for where truncation happens
-    cut_locations = Counter()
-    
-    for shard in tqdm(shards, desc="Processing Shards"):
-        df = pd.read_parquet(Path(args.pair_dir) / shard)
-        
-        for idx, row in df.iterrows():
-            row_dict = row.to_dict()
-            full_text = serialize_pair_fields(row_dict)
-            
-            tokenized = tokenizer(full_text, add_special_tokens=True, truncation=False)["input_ids"]
-            length = len(tokenized)
-            lengths.append(length)
-            
-            if length > args.max_length:
-                truncated_pairs += 1
-                
-                # Determine which field got cut
-                cumulative_len = 0
-                cut_field = "unknown"
-                for field in PAIR_TEXT_FIELDS:
-                    val_str = str(row_dict.get(field, "") or "")
-                    field_tokens = tokenizer(val_str, add_special_tokens=False)["input_ids"]
-                    
-                    # Approximating byte length plus separator
-                    cumulative_len += len(field_tokens) + len(tokenizer(" || ", add_special_tokens=False)["input_ids"])
-                    if cumulative_len >= args.max_length:
-                        cut_field = field
-                        break
-                
-                cut_locations[cut_field] += 1
-                
-    lengths_series = pd.Series(lengths)
-    
-    report = {
-        "total_pairs": len(lengths_series),
-        "truncated_pairs": truncated_pairs,
-        "truncation_rate": float(truncated_pairs / len(lengths_series)) if len(lengths_series) else 0.0,
-        "token_length_stats": {
-            "p50": float(lengths_series.quantile(0.50)),
-            "p90": float(lengths_series.quantile(0.90)),
-            "p95": float(lengths_series.quantile(0.95)),
-            "p99": float(lengths_series.quantile(0.99)),
-            "max": float(lengths_series.max()),
-        },
-        "cut_locations": dict(cut_locations)
-    }
-    
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.output).write_text(json.dumps(report, indent=2))
-    logging.info(f"Saved truncation report to {args.output}")
 
-if __name__ == "__main__":
-    main()
+    if args.max_length < 2:
+        raise ValueError("max-length must be at least 2")
+    if args.batch_size <= 0:
+        raise ValueError("batch-size must be positive")
+
+    from transformers import AutoTokenizer

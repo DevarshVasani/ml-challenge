@@ -1,54 +1,88 @@
-"""ByT5 encoder adapter for pair classification."""
+"""Encoder-only ByT5 adapter for binary business-entity pair classification.
+
+Transformers and Torch are imported only inside runtime paths so importing the
+package, ``--help``, and ``--dry-run`` remain cheap and network-free.
+"""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .base import AdapterConfig, BasePairAdapter, serialize_pair_fields
+from .base import (
+    AdapterConfig,
+    BasePairAdapter,
+    PAIR_SERIALIZATION_SEPARATOR,
+    serialize_pair_fields,
+)
 
 
-class _ByT5PairClassifier:
-    """Wrapper to encapsulate encoder, dropout, and classifier to avoid nn.Module import at module level."""
-    pass
+_ADAPTER_ARCHITECTURE = "byt5-encoder-pair-v1"
+
+
+def _validate_config(config: AdapterConfig) -> None:
+    if not config.checkpoint:
+        raise ValueError("ByT5 requires a pretrained checkpoint")
+    if int(config.max_length) < 2:
+        raise ValueError("ByT5 max_length must be at least 2 so content and EOS can be represented")
+
+
+def _masked_mean_pool(last_hidden_state: Any, attention_mask: Any) -> Any:
+    """Mean-pool sequence states while excluding all padding positions."""
+    mask = attention_mask.unsqueeze(-1).to(dtype=last_hidden_state.dtype)
+    denominator = mask.sum(dim=1).clamp_min(1.0)
+    return (last_hidden_state * mask).sum(dim=1) / denominator
+
+
+def _build_pair_classifier(encoder: Any) -> Any:
+    """Build the small trainable classification wrapper around a T5 encoder."""
+    import torch.nn as nn
+
+    class _ByT5PairClassifier(nn.Module):
+        def __init__(self, encoder_model: Any):
+            super().__init__()
+            self.encoder = encoder_model
+            dropout_rate = float(getattr(encoder_model.config, "dropout_rate", 0.1))
+            self.dropout = nn.Dropout(dropout_rate)
+            self.classifier = nn.Linear(int(encoder_model.config.d_model), 2)
+
+        def forward(self, input_ids: Any, attention_mask: Any) -> Any:
+            output = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+            pooled = _masked_mean_pool(output.last_hidden_state, attention_mask)
+            return self.classifier(self.dropout(pooled))
+
+    return _ByT5PairClassifier(encoder)
+
+
+def _resolved_revision(encoder: Any, tokenizer: Any) -> str | None:
+    """Best-effort resolved HF commit hash for reproducibility metadata."""
+    model_hash = getattr(getattr(encoder, "config", None), "_commit_hash", None)
+    if model_hash:
+        return str(model_hash)
+    init_kwargs = getattr(tokenizer, "init_kwargs", {}) or {}
+    token_hash = init_kwargs.get("_commit_hash")
+    return str(token_hash) if token_hash else None
 
 
 class ByT5EncoderPairAdapter(BasePairAdapter):
-    """ByT5 encoder-only adapter."""
+    """``google/byt5-small`` encoder + masked mean pooling + two-logit head."""
 
     def __init__(self, config: AdapterConfig):
+        _validate_config(config)
         super().__init__(config)
-        self.device = "cpu"
-        # We defer building the torch models until from_config(execute=True) or load_pretrained()
-        self.model = None
-        self.tokenizer = None
+        self.device: Any = "cpu"
+        self.model: Any = None
+        self.tokenizer: Any = None
 
     @classmethod
-    def from_config(cls, config: AdapterConfig, *, execute: bool = False) -> "BasePairAdapter":
+    def from_config(cls, config: AdapterConfig, *, execute: bool = False) -> "ByT5EncoderPairAdapter":
         if not execute:
             raise RuntimeError("adapter construction is runtime work; use --execute on a compute machine")
-        
-        import torch
-        import torch.nn as nn
+        _validate_config(config)
+
         from transformers import AutoTokenizer, T5EncoderModel
-        
-        class _Wrapper(nn.Module):
-            def __init__(self, encoder):
-                super().__init__()
-                self.encoder = encoder
-                self.dropout = nn.Dropout(encoder.config.dropout_rate)
-                self.classifier = nn.Linear(encoder.config.d_model, 2)
-            
-            def forward(self, input_ids, attention_mask):
-                outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-                hidden = outputs.last_hidden_state
-                mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
-                
-                pooled = (hidden * mask).sum(dim=1)
-                pooled = pooled / mask.sum(dim=1).clamp_min(1.0)
-                
-                return self.classifier(self.dropout(pooled))
 
         instance = cls(config)
         instance.tokenizer = AutoTokenizer.from_pretrained(
@@ -60,131 +94,3 @@ class ByT5EncoderPairAdapter(BasePairAdapter):
             config.checkpoint,
             revision=config.revision,
         )
-        instance.model = _Wrapper(encoder)
-        return instance
-
-    def serialize_pair(self, row: Mapping[str, Any]) -> str:
-        return serialize_pair_fields(row, missing_text=self.config.missing_text)
-
-    def collate(self, rows: Sequence[Mapping[str, Any]]) -> Any:
-        import torch
-        texts = [self.serialize_pair(row) for row in rows]
-        
-        # Tokenize without padding or truncation first to count truncation exactly
-        batch_tokens = self.tokenizer(texts, add_special_tokens=True, padding=False, truncation=False)
-        original_lengths = [len(ids) for ids in batch_tokens["input_ids"]]
-        
-        truncated_count = sum(1 for length in original_lengths if length > self.config.max_length)
-        
-        # Now truncate manually to keep EOS if needed, or simply let the tokenizer do it
-        # The exact instruction: "truncate each token-id list to max_length; preserve final EOS"
-        truncated_ids = []
-        for ids in batch_tokens["input_ids"]:
-            if len(ids) > self.config.max_length:
-                # keep up to max_length - 1, then append EOS
-                eos = ids[-1] if ids else 1 # default eos token id is usually 1
-                truncated = ids[:self.config.max_length - 1] + [eos]
-                truncated_ids.append(truncated)
-            else:
-                truncated_ids.append(ids)
-                
-        # Pad dynamically to the longest in the batch
-        padded = self.tokenizer.pad(
-            {"input_ids": truncated_ids}, 
-            padding=True, 
-            return_tensors="pt"
-        )
-        
-        return {
-            "input_ids": padded["input_ids"].to(self.device),
-            "attention_mask": padded["attention_mask"].to(self.device),
-            "truncated": truncated_count
-        }
-
-    def logits(self, batch: Any) -> Any:
-        return self.model(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"]
-        )
-
-    def parameters(self):
-        return self.model.parameters()
-
-    def to_device(self, device: str) -> "BasePairAdapter":
-        import torch
-        self.device = torch.device(device)
-        if self.model is not None:
-            self.model.to(self.device)
-        return self
-
-    def supports_gradient_checkpointing(self) -> bool:
-        return True
-
-    def set_gradient_checkpointing(self, enabled: bool) -> None:
-        super().set_gradient_checkpointing(enabled)
-        if enabled:
-            self.model.encoder.gradient_checkpointing_enable()
-        else:
-            self.model.encoder.gradient_checkpointing_disable()
-
-    def save_pretrained(self, output_dir: str) -> None:
-        import torch
-        out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        
-        (out / "adapter_config.json").write_text(json.dumps(self.config_dict()), encoding="utf-8")
-        
-        metadata = {
-            "architecture": "byt5-encoder-pair-v1",
-            "original_checkpoint": self.config.checkpoint,
-            "revision": self.config.revision,
-            "max_length": self.config.max_length,
-            "d_model": self.model.encoder.config.d_model,
-            "output_size": 2,
-            "pooling": "masked_mean",
-            "serialization_separator": " || "
-        }
-        (out / "adapter_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-        
-        self.tokenizer.save_pretrained(str(out / "tokenizer"))
-        self.model.encoder.save_pretrained(str(out / "encoder"))
-        torch.save(self.model.classifier.state_dict(), out / "classifier.pt")
-
-    @classmethod
-    def load_pretrained(cls, output_dir: str, *, map_location: str = "cpu") -> "BasePairAdapter":
-        import torch
-        import torch.nn as nn
-        from transformers import AutoTokenizer, T5EncoderModel
-        
-        out = Path(output_dir)
-        config_data = json.loads((out / "adapter_config.json").read_text(encoding="utf-8"))
-        config = AdapterConfig(**config_data)
-        
-        instance = cls(config)
-        instance.tokenizer = AutoTokenizer.from_pretrained(str(out / "tokenizer"), use_fast=False)
-        
-        encoder = T5EncoderModel.from_pretrained(str(out / "encoder"))
-        
-        class _Wrapper(nn.Module):
-            def __init__(self, encoder):
-                super().__init__()
-                self.encoder = encoder
-                self.dropout = nn.Dropout(encoder.config.dropout_rate)
-                self.classifier = nn.Linear(encoder.config.d_model, 2)
-            
-            def forward(self, input_ids, attention_mask):
-                outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-                hidden = outputs.last_hidden_state
-                mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
-                
-                pooled = (hidden * mask).sum(dim=1)
-                pooled = pooled / mask.sum(dim=1).clamp_min(1.0)
-                
-                return self.classifier(self.dropout(pooled))
-                
-        instance.model = _Wrapper(encoder)
-        classifier_state = torch.load(out / "classifier.pt", map_location=map_location, weights_only=True)
-        instance.model.classifier.load_state_dict(classifier_state)
-        
-        instance.to_device(map_location)
-        return instance

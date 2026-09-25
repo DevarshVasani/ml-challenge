@@ -107,3 +107,7 @@ audit_output/match_cardinality.tsv
 # Environment
 .env
 venv/
+
+artifacts/
+audit_report/
+docs/
