@@ -16,6 +16,7 @@ from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from .evaluate import evaluate_predictions
+from .model_config import BaselineModelConfig
 from .split import load_ground_truth
 
 
@@ -49,8 +50,13 @@ def _pair_weights(frame: pd.DataFrame) -> np.ndarray:
     return 1.0 / counts.to_numpy(dtype=float)
 
 
-def _new_classifier() -> HistGradientBoostingClassifier:
-    return HistGradientBoostingClassifier(max_iter=150, learning_rate=0.08, max_leaf_nodes=15, l2_regularization=0.5, random_state=42)
+def _new_classifier(config: BaselineModelConfig | None = None) -> HistGradientBoostingClassifier:
+    config = config or BaselineModelConfig()
+    return HistGradientBoostingClassifier(
+        max_iter=config.max_iter, learning_rate=config.learning_rate,
+        max_leaf_nodes=config.max_leaf_nodes, l2_regularization=config.l2_regularization,
+        random_state=config.seed,
+    )
 
 
 def _positive_multiplier(y_train: np.ndarray, setting: str | float) -> float:
@@ -75,8 +81,8 @@ def _training_weights(frame: pd.DataFrame, y: np.ndarray, positive_weight: str |
     return weights * np.where(y == 1, multiplier, 1.0), multiplier
 
 
-def _fit_classifier(x_train: np.ndarray, y_train: np.ndarray, weights: np.ndarray, classifier_factory: Callable[[], object] | None = None) -> object:
-    classifier: object = DummyClassifier(strategy="prior") if np.unique(y_train).size < 2 else (classifier_factory() if classifier_factory else _new_classifier())
+def _fit_classifier(x_train: np.ndarray, y_train: np.ndarray, weights: np.ndarray, classifier_factory: Callable[[], object] | None = None, config: BaselineModelConfig | None = None) -> object:
+    classifier: object = DummyClassifier(strategy="prior") if np.unique(y_train).size < 2 else (classifier_factory() if classifier_factory else _new_classifier(config))
     classifier.fit(x_train, y_train, sample_weight=weights)
     return classifier
 
@@ -115,7 +121,7 @@ def _with_endpoint_folds(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def generate_oof_predictions(frame: pd.DataFrame, feature_columns: Sequence[str] | None = None, classifier_factory: Callable[[], object] | None = None, positive_weight: str | float = "none") -> tuple[pd.DataFrame, list[str]]:
+def generate_oof_predictions(frame: pd.DataFrame, feature_columns: Sequence[str] | None = None, classifier_factory: Callable[[], object] | None = None, positive_weight: str | float = "none", model_config: BaselineModelConfig | None = None) -> tuple[pd.DataFrame, list[str]]:
     frame = deduplicate_pair_rows(_with_endpoint_folds(frame))
     required = {"source1_entity_id", "candidate_entity_id", "source1_fold", "candidate_fold", "label"}
     missing = required - set(frame.columns)
@@ -138,7 +144,7 @@ def generate_oof_predictions(frame: pd.DataFrame, feature_columns: Sequence[str]
             raise ValueError(f"Fold {fold} cannot be evaluated with an empty train or validation partition")
         weights, multiplier = _training_weights(frame.loc[training], y[training], positive_weight)
         fold_multipliers[str(fold)] = multiplier
-        model = _fit_classifier(x[training], y[training], weights, classifier_factory)
+        model = _fit_classifier(x[training], y[training], weights, classifier_factory, model_config)
         oof_scores[validation] = _positive_probability(model, x[validation])
     if not np.isfinite(oof_scores).all():
         raise RuntimeError("OOF prediction generation left non-finite scores")
@@ -185,11 +191,11 @@ def search_threshold(oof_predictions: pd.DataFrame, ground_truth: Mapping[str, I
     return max(results, key=lambda item: (float(item[1]["macro_f05"]), item[0]))
 
 
-def _fit_final_model(frame: pd.DataFrame, feature_columns: Sequence[str], positive_weight: str | float = "none") -> tuple[object, float]:
+def _fit_final_model(frame: pd.DataFrame, feature_columns: Sequence[str], positive_weight: str | float = "none", model_config: BaselineModelConfig | None = None) -> tuple[object, float]:
     x = _feature_matrix(frame, feature_columns)
     y = pd.to_numeric(frame["label"], errors="raise").to_numpy(dtype=int)
     weights, multiplier = _training_weights(frame, y, positive_weight)
-    return _fit_classifier(x, y, weights), multiplier
+    return _fit_classifier(x, y, weights, config=model_config), multiplier
 
 
 def _country_metrics(oof: pd.DataFrame, ground_truth: Mapping[str, Iterable[str]], threshold: float, s1_path: str | os.PathLike[str] | None) -> dict[str, float]:
@@ -208,12 +214,19 @@ def _country_metrics(oof: pd.DataFrame, ground_truth: Mapping[str, Iterable[str]
     return result
 
 
-def train_pair_model(feature_path: str | os.PathLike[str], ground_truth_path: str | os.PathLike[str], output_dir: str | os.PathLike[str], positive_weight: str | float = "none", s1_path: str | os.PathLike[str] | None = None, seed: int = 42, feature_generation_runtime_seconds: float | None = None) -> dict[str, object]:
+def train_pair_model(feature_path: str | os.PathLike[str], ground_truth_path: str | os.PathLike[str], output_dir: str | os.PathLike[str], positive_weight: str | float = "none", s1_path: str | os.PathLike[str] | None = None, seed: int = 42, feature_generation_runtime_seconds: float | None = None, model_config: BaselineModelConfig | Mapping[str, object] | None = None) -> dict[str, object]:
     started = time.perf_counter()
     frame = pd.read_parquet(feature_path)
     frame = deduplicate_pair_rows(_with_endpoint_folds(frame))
     ground_truth = load_ground_truth(str(ground_truth_path))
-    oof, feature_columns = generate_oof_predictions(frame, positive_weight=positive_weight)
+    if model_config is None:
+        config = BaselineModelConfig(seed=seed, positive_weight=positive_weight)
+    elif isinstance(model_config, BaselineModelConfig):
+        config = model_config
+    else:
+        config = BaselineModelConfig.from_mapping(model_config)
+    config = BaselineModelConfig(**{**config.to_dict(), "seed": seed, "positive_weight": positive_weight, "feature_columns": tuple(identify_feature_columns(frame))})
+    oof, feature_columns = generate_oof_predictions(frame, feature_columns=config.feature_columns, positive_weight=positive_weight, model_config=config)
     threshold, selected = search_threshold(oof, ground_truth)
     predictions = predictions_from_threshold(oof, threshold)
     positive_count = sum(len(values) for values in predictions.values())
@@ -229,11 +242,11 @@ def train_pair_model(feature_path: str | os.PathLike[str], ground_truth_path: st
         "feature_generation_runtime_seconds": feature_generation_runtime_seconds,
     })
     output_path = Path(output_dir); output_path.mkdir(parents=True, exist_ok=True)
-    final_model, final_multiplier = _fit_final_model(frame, feature_columns, positive_weight)
+    final_model, final_multiplier = _fit_final_model(frame, feature_columns, positive_weight, config)
     metrics["final_positive_weight_multiplier"] = final_multiplier
     joblib.dump(final_model, output_path / "final_model.joblib")
     (output_path / "feature_columns.json").write_text(json.dumps(feature_columns, indent=2), encoding="utf-8")
-    (output_path / "training_config.json").write_text(json.dumps({"positive_weight": positive_weight, "seed": seed, "feature_columns": feature_columns}, indent=2), encoding="utf-8")
+    (output_path / "training_config.json").write_text(json.dumps(config.to_dict(), indent=2), encoding="utf-8")
     oof.to_parquet(output_path / "oof_predictions.parquet", index=False); oof.to_csv(output_path / "oof_predictions.tsv", sep="\t", index=False)
     (output_path / "best_threshold.json").write_text(json.dumps({"threshold": float(threshold)}, indent=2), encoding="utf-8")
     (output_path / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
