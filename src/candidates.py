@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -11,7 +12,7 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.neighbors import NearestNeighbors
+from sparse_dot_topn import sp_matmul_topn
 
 from .evaluate import evaluate_predictions
 from .text_utils import normalize_text
@@ -64,39 +65,76 @@ def retrieve_channel(
     batch_size: int = 2048,
     candidate_source: str = "S2",
 ) -> pd.DataFrame:
-    """Retrieve one channel in bounded query batches."""
+    """Retrieve one channel with sparse exact top-K cosine similarity.
+
+    sklearn.neighbors.NearestNeighbors falls back to brute-force search on
+    sparse TF-IDF input. Sparse top-N multiplication instead follows only
+    overlapping TF-IDF features and keeps at most top_k matches per query.
+    """
     columns = ["source1_entity_id", "candidate_entity_id", "candidate_source", "score", "rank"]
     if top_k <= 0 or source.empty or s1.empty:
         return pd.DataFrame(columns=columns)
+
     source_text = _text_column(source, field)
     query_text = _text_column(s1, field)
-    vectorizer = _vectorizer(pd.concat([query_text, source_text], ignore_index=True).tolist())
+
+    # Query-only features can never contribute to a source match, so fitting
+    # only on the indexed source keeps the vocabulary and IDF work smaller.
+    vectorizer = _vectorizer(source_text.tolist())
     if vectorizer is None:
         return pd.DataFrame(columns=columns)
-    source_matrix = vectorizer.transform(source_text.tolist())
+
+    source_matrix = vectorizer.transform(source_text.tolist()).astype(np.float32).tocsr()
+    source_matrix_t = source_matrix.T.tocsr()
     query_indices = [i for i, value in enumerate(query_text.tolist()) if value]
     if not query_indices:
         return pd.DataFrame(columns=columns)
+
     n_neighbors = min(int(top_k), len(source))
-    index = NearestNeighbors(n_neighbors=n_neighbors, metric="cosine", n_jobs=-1).fit(source_matrix)
+    batch_size = max(1, int(batch_size))
+    n_threads = max(1, min(8, os.cpu_count() or 1))
     source_ids = source["entity_id"].astype(str).tolist()
     s1_ids = s1["entity_id"].astype(str).tolist()
     rows: list[dict[str, Any]] = []
-    batch_size = max(1, int(batch_size))
+
     for start in range(0, len(query_indices), batch_size):
         batch_indices = query_indices[start : start + batch_size]
-        distances, neighbors = index.kneighbors(vectorizer.transform(query_text.iloc[batch_indices].tolist()))
+        query_matrix = (
+            vectorizer.transform(query_text.iloc[batch_indices].tolist())
+            .astype(np.float32)
+            .tocsr()
+        )
+
+        # TfidfVectorizer L2-normalizes rows by default, so sparse dot product
+        # equals cosine similarity. The sparse kernel retains only top-K
+        # nonzero results instead of scanning every source row for every query.
+        similarities = sp_matmul_topn(
+            query_matrix,
+            source_matrix_t,
+            top_n=n_neighbors,
+            threshold=0.0,
+            sort=True,
+            n_threads=n_threads,
+        )
+
         for local, s1_index in enumerate(batch_indices):
-            for rank, (distance, source_index) in enumerate(zip(distances[local], neighbors[local]), start=1):
+            row_start = similarities.indptr[local]
+            row_end = similarities.indptr[local + 1]
+            candidate_indices = similarities.indices[row_start:row_end]
+            candidate_scores = similarities.data[row_start:row_end]
+
+            for rank, (source_index, score) in enumerate(
+                zip(candidate_indices, candidate_scores), start=1
+            ):
                 rows.append({
                     "source1_entity_id": s1_ids[s1_index],
                     "candidate_entity_id": source_ids[int(source_index)],
                     "candidate_source": candidate_source,
-                    "score": float(max(0.0, 1.0 - distance)),
+                    "score": float(score),
                     "rank": rank,
                 })
-    return pd.DataFrame(rows, columns=columns)
 
+    return pd.DataFrame(rows, columns=columns)
 
 def retrieve_candidates(s1_df: pd.DataFrame, source_df: pd.DataFrame, column: str, n_candidates: int = 50, batch_size: int = 2048) -> pd.DataFrame:
     """Compatibility wrapper for the original prototype API."""
@@ -132,9 +170,12 @@ def union_candidates(channels: Mapping[str, pd.DataFrame]) -> pd.DataFrame:
         return pd.DataFrame(columns=output_columns)
     combined = pd.concat(parts, ignore_index=True)
     rows: list[dict[str, Any]] = []
-    for keys, group in combined.groupby(["source1_entity_id", "candidate_entity_id"], sort=False, dropna=False):
-        source1_id, candidate_id = keys
-        candidate_source = str(group.iloc[0]["candidate_source"])
+    for keys, group in combined.groupby(
+        ["source1_entity_id", "candidate_source", "candidate_entity_id"],
+        sort=False,
+        dropna=False,
+    ):
+        source1_id, candidate_source, candidate_id = keys
         name_scores = pd.to_numeric(group["name_tfidf_score"], errors="coerce").fillna(0.0)
         address_scores = pd.to_numeric(group["address_tfidf_score"], errors="coerce").fillna(0.0)
         name_ranks = pd.to_numeric(group["name_rank"], errors="coerce").fillna(0)
