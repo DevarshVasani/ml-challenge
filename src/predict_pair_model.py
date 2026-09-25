@@ -11,6 +11,7 @@ import joblib
 import pandas as pd
 
 from .train_pair_model import _feature_matrix, predictions_from_threshold
+from .model_config import CANDIDATE_SCHEMA_VERSION, FEATURE_SCHEMA_VERSION, BaselineModelConfig
 
 
 def _read_features(path: str | Path) -> pd.DataFrame:
@@ -20,10 +21,21 @@ def _read_features(path: str | Path) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t", dtype=object, keep_default_na=False)
 
 
-def predict_pair_model(test_features: str | Path | pd.DataFrame, model_dir: str | Path, output_dir: str | Path, s1_ids: Iterable[str] | None = None, threshold: float | None = None) -> dict[str, object]:
+def predict_pair_model(test_features: str | Path | pd.DataFrame, model_dir: str | Path, output_dir: str | Path, s1_ids: Iterable[str] | None = None, threshold: float | None = None, feature_schema_version: str | None = None, candidate_schema_version: str | None = None) -> dict[str, object]:
     model_dir = Path(model_dir); output_dir = Path(output_dir); output_dir.mkdir(parents=True, exist_ok=True)
     model = joblib.load(model_dir / "final_model.joblib")
     feature_columns = json.loads((model_dir / "feature_columns.json").read_text(encoding="utf-8"))
+    config_path = model_dir / "training_config.json"
+    if config_path.exists():
+        config = BaselineModelConfig.from_mapping(json.loads(config_path.read_text(encoding="utf-8")))
+        if list(config.feature_columns) != list(feature_columns):
+            raise ValueError("Model feature column order does not match training_config.json")
+        if config.feature_schema_version != (feature_schema_version or FEATURE_SCHEMA_VERSION):
+            raise ValueError("Feature schema version does not match the trained model")
+        if config.candidate_schema_version != (candidate_schema_version or CANDIDATE_SCHEMA_VERSION):
+            raise ValueError("Candidate schema version does not match the trained model")
+    elif feature_schema_version not in (None, FEATURE_SCHEMA_VERSION) or candidate_schema_version not in (None, CANDIDATE_SCHEMA_VERSION):
+        raise ValueError("Schema version verification requires training_config.json")
     frame = _read_features(test_features) if not isinstance(test_features, pd.DataFrame) else test_features.copy()
     required = {"source1_entity_id", "candidate_entity_id"}
     missing_ids = required - set(frame.columns)

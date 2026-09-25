@@ -1,0 +1,1 @@
+run_id,hypothesis,git_commit,config_path,data_hash,fold_hash,candidate_version,feature_version,model,seed,threshold,oof_macro_f05,threshold_transfer_f05,singleton_accuracy,non_singleton_f05,us_f05,india_f05,candidate_recall,oracle_f05,total_pairs,runtime_seconds,peak_ram_gb,artifact_path,status,decision
