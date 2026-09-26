@@ -1,0 +1,16 @@
+{
+  "adapter_type": "mdeberta",
+  "checkpoint": "artifacts/neural-mdeberta",
+  "pairs": "artifacts/tree-routes/v1/*.parquet",
+  "require_complete_sidecar": true,
+  "route_column": "route",
+  "route_value": "neural",
+  "require_route": true,
+  "key_columns": {"source1_entity_id": "source1_entity_id", "candidate_entity_id": "candidate_entity_id", "candidate_source": "candidate_source"},
+  "source_store": "artifacts/source-store.sqlite",
+  "reuse_from": ["artifacts/neural-scores/threshold"],
+  "device": "cuda",
+  "max_tokens": 16384,
+  "max_batch_rows": 512,
+  "output_dir": "artifacts/neural-scores/routes-v1"
+}

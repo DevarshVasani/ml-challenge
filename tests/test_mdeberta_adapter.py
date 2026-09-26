@@ -6,6 +6,7 @@ microsoft/mdeberta-v3-base, so nothing is downloaded.
 
 import math
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -139,3 +140,49 @@ def test_shared_trainer_overfits_tiny_set_and_checkpoints(tiny_checkpoint, tmp_p
     reloaded = MDebertaPairAdapter.load_pretrained(str(tmp_path / "run" / "adapter"))
     scores = predict_pairs(reloaded, rows.drop(columns="label"), batch_size=4)
     assert (scores["score"].to_numpy() > 0.5).tolist() == [True, False, True, False]
+
+
+def _varied_rows():
+    long_address = " ".join(["Hauptstraße 7 Bengaluru Springfield"] * 12)
+    return [_row(cid="S2-1"), _row(cid="S2-2", name_b="Joes Pizza", address_b="100 Main St", country_b="United States"),
+            _row(cid="S2-3", address_b=long_address), _row(cid="S2-4", name_a="", address_a=None, name_b="Müller Bakery"),
+            _row(cid="S2-5", name_a="Sharma Traders", address_a=long_address, country_a="India")]
+
+
+def test_packed_encode_matches_collate_tokens_logits_and_truncation(tiny_checkpoint):
+    adapter = _adapter(tiny_checkpoint, max_length=40)
+    adapter.model.eval()
+    rows = _varied_rows()
+    encoded = adapter.encode(rows)
+    reference = adapter.collate(rows)
+    lengths = [int(n) for n in reference["attention_mask"].sum(dim=1)]
+    assert list(encoded["offsets"][1:] - encoded["offsets"][:-1]) == lengths
+    assert encoded["truncated"].tolist() == [n > 40 for n in reference["untruncated_lengths"]]
+    assert encoded["truncated"].sum() == reference["truncated"] >= 1
+    # Any row order / batch composition gives the same tokens and (to float tolerance) logits.
+    order = [3, 0, 4, 2, 1]
+    batch = adapter.pad_encoded(encoded, order)
+    for row, index in enumerate(order):
+        n = lengths[index]
+        assert batch["input_ids"][row, :n].tolist() == reference["input_ids"][index, :n].tolist()
+    with torch.no_grad():
+        packed = adapter.logits(batch)
+        expected = adapter.logits(reference)[order]
+    assert torch.allclose(packed, expected, atol=1e-5)
+
+
+def test_production_scorer_logits_match_pilot_probabilities(tiny_checkpoint, tmp_path):
+    from src.score_neural import execute as score
+
+    adapter = _adapter(tiny_checkpoint, max_length=40)
+    adapter.save_pretrained(str(tmp_path / "ckpt"))
+    pairs = pd.DataFrame(_varied_rows()).drop(columns="label")
+    pairs.to_parquet(tmp_path / "pairs-0.parquet", index=False)
+    result = score({"adapter_type": "mdeberta", "checkpoint": str(tmp_path / "ckpt"), "pairs": [str(tmp_path / "pairs-0.parquet")],
+                    "device": "cpu", "max_tokens": 64, "output_dir": str(tmp_path / "scores")}, log=lambda *_: None)
+    assert result["completion"] == "complete" and result["model_pairs"] == 5 and result["truncated"] >= 1
+    scores = pd.read_parquet(tmp_path / "scores" / "pairs-0.neural.parquet")
+    pilot = predict_pairs(MDebertaPairAdapter.load_pretrained(str(tmp_path / "ckpt")), pairs, batch_size=5)
+    merged = scores.merge(pilot, on=["source1_entity_id", "candidate_entity_id", "candidate_source"], validate="1:1")
+    assert merged["neural_scored"].all() and (merged["neural_status"] == "scored").all()
+    assert np.allclose(1 / (1 + np.exp(-merged["neural_logit"])), merged["score"], atol=1e-5)

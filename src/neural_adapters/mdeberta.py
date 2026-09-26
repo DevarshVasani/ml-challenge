@@ -132,6 +132,68 @@ class MDebertaPairAdapter(BasePairAdapter):
         batch["untruncated_lengths"] = lengths
         return batch
 
+    # -- bucketed inference --------------------------------------------
+    # collate() tokenizes twice per batch and pads in arrival order. The
+    # production scorer instead tokenizes a whole shard once into packed
+    # arrays, sorts by length and pads token-budget batches from them. The
+    # token IDs are identical to collate(); only batching differs.
+
+    def input_signature(self) -> dict[str, Any]:
+        """Everything besides the weights that decides which tokens a pair becomes."""
+        return {"serialization": SERIALIZATION_VERSION, "separator": FIELD_SEPARATOR, "truncation": "longest_first",
+                "max_length": self.config.max_length, "missing_text": self.config.missing_text,
+                "tokenizer": type(self.tokenizer).__name__, "vocab_size": len(self.tokenizer)}
+
+    def encode(self, rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        """Tokenize rows once, unpadded, into flat numpy arrays plus offsets."""
+        import numpy as np
+        from itertools import chain
+
+        if not rows:
+            return {"input_ids": np.zeros(0, np.int32), "token_type_ids": None, "offsets": np.zeros(1, np.int64), "truncated": np.zeros(0, bool)}
+        firsts, seconds = map(list, zip(*(self.segments(row) for row in rows)))
+        encoded = self.tokenizer(firsts, seconds, truncation="longest_first", max_length=self.config.max_length,
+                                 return_attention_mask=False, verbose=False)
+        ids = encoded["input_ids"]
+        lengths = np.fromiter((len(x) for x in ids), np.int64, len(ids))
+        offsets = np.zeros(len(ids) + 1, np.int64); np.cumsum(lengths, out=offsets[1:])
+        total = int(offsets[-1])
+        types = encoded.get("token_type_ids")
+        # A pair is truncated only if it reached the limit; re-check just those untruncated.
+        truncated = np.zeros(len(ids), bool)
+        at_limit = np.flatnonzero(lengths >= self.config.max_length)
+        if len(at_limit):
+            full = self.tokenizer([firsts[i] for i in at_limit], [seconds[i] for i in at_limit], truncation=False, verbose=False)["input_ids"]
+            truncated[at_limit] = [len(x) > self.config.max_length for x in full]
+        return {
+            "input_ids": np.fromiter(chain.from_iterable(ids), np.int32, total),
+            "token_type_ids": np.fromiter(chain.from_iterable(types), np.int8, total) if types is not None else None,
+            "offsets": offsets, "truncated": truncated,
+        }
+
+    def pad_encoded(self, encoded: Mapping[str, Any], indices: Sequence[int]) -> dict[str, Any]:
+        """Right-pad the selected packed rows into one device batch."""
+        import numpy as np
+
+        torch = self._torch
+        if self.tokenizer.padding_side != "right":
+            raise ValueError("pad_encoded right-pads; the checkpoint tokenizer must use padding_side='right' like collate()")
+        offsets = encoded["offsets"]
+        lengths = offsets[1:][indices] - offsets[:-1][indices]
+        width = int(lengths.max())
+        input_ids = np.full((len(indices), width), self.tokenizer.pad_token_id, np.int64)
+        attention = np.zeros((len(indices), width), np.int64)
+        types = np.full((len(indices), width), self.tokenizer.pad_token_type_id, np.int64) if encoded["token_type_ids"] is not None else None
+        for row, (index, length) in enumerate(zip(indices, lengths)):
+            start = offsets[index]
+            input_ids[row, :length] = encoded["input_ids"][start : start + length]
+            attention[row, :length] = 1
+            if types is not None:
+                types[row, :length] = encoded["token_type_ids"][start : start + length]
+        arrays = {"input_ids": input_ids, "attention_mask": attention, **({"token_type_ids": types} if types is not None else {})}
+        pin = self.device.type == "cuda"
+        return {key: (torch.from_numpy(value).pin_memory() if pin else torch.from_numpy(value)).to(self.device, non_blocking=pin) for key, value in arrays.items()}
+
     # -- model ---------------------------------------------------------
 
     def logits(self, batch: Mapping[str, Any]):

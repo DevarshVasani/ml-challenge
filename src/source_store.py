@@ -175,6 +175,15 @@ class SourceStore:
         return {key: values[0] for key, values in result.items()}
 
 
+def record_text(payload: Mapping[str, Any], suffix: str) -> dict[str, str]:
+    """The one mapping from a stored record to model text fields; training and scoring share it."""
+    return {
+        f"name_{suffix}": str(payload.get("business_name", payload.get("name", "")) or ""),
+        f"address_{suffix}": str(payload.get("business_address", payload.get("address", "")) or ""),
+        f"country_{suffix}": str(payload.get("country", "") or ""),
+    }
+
+
 def make_pair_group(candidate_group, source1_records: Mapping[str, Mapping[str, Any]], store: SourceStore, *, folds: Mapping[str, int] | None = None, ground_truth: Mapping[str, Iterable[str]] | None = None):
     """Resolve one complete candidate group; no global pair dataframe is built."""
     if candidate_group.empty:
@@ -202,8 +211,7 @@ def make_pair_group(candidate_group, source1_records: Mapping[str, Mapping[str, 
             candidate_id = str(row["candidate_entity_id"]); right = records[candidate_id]
             values = {
                 "source1_entity_id": sid, "candidate_entity_id": candidate_id, "candidate_source": str(source),
-                "name_a": str(left.get("business_name", left.get("name", "")) or ""), "address_a": str(left.get("business_address", left.get("address", "")) or ""), "country_a": str(left.get("country", "") or ""),
-                "name_b": str(right.get("business_name", right.get("name", "")) or ""), "address_b": str(right.get("business_address", right.get("address", "")) or ""), "country_b": str(right.get("country", "") or ""),
+                **record_text(left, "a"), **record_text(right, "b"),
             }
             if folds is not None:
                 if sid not in folds or candidate_id not in folds: raise ValueError(f"missing fold endpoint for {sid}/{candidate_id}")

@@ -1,0 +1,10 @@
+{
+  "adapter_type": "mdeberta",
+  "checkpoint": "artifacts/neural-mdeberta",
+  "pair_manifest": "artifacts/neural-data/threshold_pairs_manifest.json",
+  "pair_subdir": "threshold_pairs",
+  "device": "cuda",
+  "max_tokens": 16384,
+  "max_batch_rows": 512,
+  "output_dir": "artifacts/neural-scores/threshold"
+}
