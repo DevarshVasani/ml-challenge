@@ -141,7 +141,7 @@ test S1 queries, approximately 34.7 million pairs at 20 candidates/query.
 
 - Infrastructure implemented: offline contracts and fake-adapter workflow are complete.
 - Data preparation not run: real indexes, stores, candidates, and pair shards await compute.
-- Member B implementation pending: the mDeBERTa adapter intentionally raises an actionable error.
+- Member B adapter implemented and tested offline on a tiny random DeBERTa-v2 model; see `docs/member_b_lightning_runbook.md` for the GPU steps.
 - Member C implementation pending: the ByT5 encoder adapter intentionally raises an actionable error.
 - GPU validation not run: fit, throughput, memory, accuracy, and real checkpoint compatibility remain unmeasured.
 - Exact resume currently requires deterministic single-process loading with `num_workers=0`.
