@@ -181,3 +181,23 @@ def test_checkpoint_card_verifies_training_inputs_and_lists_exposure(tmp_path):
     assert card["exposure"]["heldout_queries_seen_in_training"] == {"threshold": 0, "final": 1}
     (data / "query_manifest.json").write_text("{}")
     assert not build_card(str(tmp_path / "ckpt"), str(train_config), str(tmp_path / "card2"))["training"]["inputs_verified"]
+
+
+def test_records_files_give_same_text_as_source_store(tmp_path):
+    records = pd.DataFrame({"source": ["S1", "S1", "S2", "S3"], "record_id": ["S1-001", "S1-002", "S2-001", "S3-001"],
+                            "business_name": ["Café", "Two", "Cafe", None], "business_address": ["1 Main", "2 Main", "1 Main St", "1 Main"],
+                            "country": ["US", "India", "US", "US"]})
+    records.to_parquet(tmp_path / "records.parquet", index=False)
+    store_dir = tmp_path / "tsv"; store_dir.mkdir()
+    for source, rows in records.rename(columns={"record_id": "entity_id"}).fillna("").groupby("source"):
+        rows.drop(columns="source").to_csv(store_dir / f"{source}.tsv", sep="\t", index=False)
+    SourceStore.build({s: str(store_dir / f"{s}.tsv") for s in ("S1", "S2", "S3")}, tmp_path / "store.sqlite")
+    pairs = pd.DataFrame({"source1_entity_id": ["S1-001", "S1-001", "S1-002"], "candidate_entity_id": ["S2-001", "S3-001", "S2-404"], "candidate_source": ["S2", "S3", "S2"]})
+    pairs.to_parquet(tmp_path / "keys.parquet", index=False)
+    via_records = execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), output_dir=str(tmp_path / "a")), **QUIET)
+    execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], source_store=str(tmp_path / "store.sqlite"), output_dir=str(tmp_path / "b")), **QUIET)
+    a, b = _read(tmp_path / "a"), _read(tmp_path / "b")
+    assert via_records["missing_record"] == 1 and a["neural_status"].tolist() == ["scored", "scored", "missing_record"]
+    assert a["cache_key"].tolist() == b["cache_key"].tolist()  # identical key + model text (None name -> "")
+    with pytest.raises(ValueError, match="not both"):
+        execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), source_store=str(tmp_path / "store.sqlite"), output_dir=str(tmp_path / "c")), **QUIET)

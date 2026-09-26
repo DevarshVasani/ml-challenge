@@ -1,0 +1,11 @@
+{
+  "adapter_type": "mdeberta",
+  "checkpoint": "artifacts/neural-mdeberta",
+  "pairs": ["artifacts/member-b-starter-v1/threshold_candidate_pairs.parquet"],
+  "records": ["artifacts/member-b-starter-v1/threshold_records.parquet"],
+  "reuse_from": ["artifacts/neural-scores/threshold"],
+  "device": "cuda",
+  "max_tokens": 16384,
+  "max_batch_rows": 512,
+  "output_dir": "artifacts/neural-scores/b-starter-v1"
+}

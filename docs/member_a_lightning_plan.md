@@ -98,6 +98,43 @@ Send D `artifacts/neural-scores/threshold/` (keys + logits; no labels) and
 the checkpoint ID. D fits calibration/fusion on it only within the clean
 components defined by the card.
 
+## 3b. B's starter package: key-only pipeline rehearsal (≈1 min) — right after step 3
+
+B's starter (`member-b-starter-v1`) is in B's handoff format: key-only pair
+shards plus separate `*_records.parquet` text. Its query sets are identical to
+the checkpoint's query manifest (sha `789fc4ff5016…`), and on the laptop its
+25,428 threshold-sample pairs joined through `threshold_records.parquet`
+reproduced the training text exactly (0 mismatches in all six fields).
+
+Put the folder at `artifacts/member-b-starter-v1/`, then:
+
+```bash
+python -m src.score_neural --config configs/neural/score_mdeberta_b_starter.json --execute | tee artifacts/score-b-starter.log
+```
+
+Expect `cached: 25428`, `model_pairs: 0`, `missing_record: 0`: every pair's
+key, text and checkpoint hash-matches the threshold scores from step 3, which
+proves the key-only + records path feeds the model byte-identical input on
+this machine. Anything scored or missing here means a text/format mismatch;
+stop and compare before production. Do not open `evaluation_truth.tsv` or
+`train_labels.parquet`; they are D's and C's.
+
+## 3c. Test-set source store (CPU, run in a second tmux window now)
+
+B confirmed no SQLite source store exists. Production route shards will be
+key-only test pairs, so build one from the test TSVs (≈11.7M records; CPU
+only, resumable, runs alongside GPU scoring):
+
+```bash
+python -m src.build_source_store --config configs/neural/source_store_test.json --dry-run
+python -m src.build_source_store --config configs/neural/source_store_test.json --execute | tee artifacts/source-store-test.log
+```
+
+`score_mdeberta_routes.json` already points at `artifacts/source-store-test.sqlite`.
+If B instead publishes test `*_records.parquet` files, replace `source_store`
+with `"records": [...]` (the records path holds everything in RAM; fine for
+samples, check free memory before loading all 11.7M test records).
+
 ## 4. First real handoff: new candidate sample from C — by hour 6
 
 When C publishes the first route shards for the new candidate sample:
@@ -105,11 +142,11 @@ When C publishes the first route shards for the new candidate sample:
 1. Agree C's column names; set `key_columns`, the `pairs` glob and a versioned
    `output_dir` (e.g. `artifacts/neural-scores/routes-v1`) in
    `configs/neural/score_mdeberta_routes.json`.
-2. Get the source store for those records from B. The config expects
-   `artifacts/source-store.sqlite`; for test-set routes it must be a store built
-   from the **test** S1/S2/S3 files — the train store will mark every pair
-   `missing_record`. If C's shards already carry the six text columns the
-   store is not needed.
+2. Point the text source at the right split: `artifacts/source-store-test.sqlite`
+   (step 3c) for test routes; for a validation (train-split) sample use B's
+   `*_records.parquet` via `records`. A wrong-split store marks every pair
+   `missing_record`. If C's shards already carry the six text columns, no text
+   source is needed.
 3. Dry run, then execute, then check the manifest:
 
 ```bash
@@ -163,6 +200,8 @@ A status @ hour <h>
 checkpoint: <checkpoint_id> (inputs_verified=<true/false>)
 throughput: <pairs/s> on T4 <precision>, max_tokens=<n>, peak <GB> GB
 threshold logits: <done/in progress> -> artifacts/neural-scores/threshold (<rows> rows, 0 unscored)
+b-starter rehearsal: <cached>/25428 cached, <missing> missing (expect 25428 / 0)
+test source store: <building / done, N records>
 routes: <version> <done>/<total> shards, <rows> rows, missing_record=<n>, nonfinite=<n>, ETA <time>
 blockers: <none | what I need from B/C/D>
 ```

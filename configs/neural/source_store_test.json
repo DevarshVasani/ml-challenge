@@ -1,0 +1,10 @@
+{
+  "sources": {
+    "S1": "student_resource/dataset/test/test_source1.tsv",
+    "S2": "student_resource/dataset/test/test_source2.tsv",
+    "S3": "student_resource/dataset/test/test_source3.tsv"
+  },
+  "batch_size": 10000,
+  "resume": true,
+  "output": "artifacts/source-store-test.sqlite"
+}

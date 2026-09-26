@@ -61,9 +61,12 @@ mapping to C's column names, `output_dir` per candidate/route version), then:
 python -m src.score_neural --config configs/neural/score_mdeberta_routes.json --execute
 ```
 
-- Key-only shards get their text from `source_store` via `record_text`, the same
-  mapping used to build the training pairs. Shards that already carry the six
-  text fields use them directly.
+- Key-only shards get their text via `record_text`, the same mapping used to
+  build the training pairs, from either `source_store` (SQLite, built with
+  `src.build_source_store`; `configs/neural/source_store_test.json` for test) or
+  `records` (B's `*_records.parquet` files: `source, record_id, business_name,
+  business_address, country`; loaded into RAM). Shards that already carry the
+  six text fields use them directly.
 - With `require_complete_sidecar`, only shards whose `<shard>.complete.json`
   exists are scored. The rest are listed as `pending_inputs`. Rerunning is
   idempotent and picks up newly published shards, so loop it while C publishes:
@@ -88,7 +91,7 @@ scoring identity, `pending_inputs`).
 | `source1_entity_id`, `candidate_entity_id`, `candidate_source` | pair key, strings |
 | `neural_logit` | `logit[match] - logit[no_match]`, float32, uncalibrated; `sigmoid` = model probability. NaN iff not scored |
 | `neural_scored` | true iff `neural_status` ∈ {`scored`, `cached`} |
-| `neural_status` | `scored`, `cached`, `missing_record` (ID absent from source store), `nonfinite` |
+| `neural_status` | `scored`, `cached`, `missing_record` (ID absent from the records/source store), `nonfinite` |
 | `checkpoint_id` | `ckpt-<hash of adapter weights/tokenizer/config>`; one per output dir |
 | `cache_key` | hash of key + model text + checkpoint/input format |
 | `truncated`, `token_length` | input diagnostics (`-1` when not tokenized in this run) |

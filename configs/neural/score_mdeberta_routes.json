@@ -7,7 +7,7 @@
   "route_value": "neural",
   "require_route": true,
   "key_columns": {"source1_entity_id": "source1_entity_id", "candidate_entity_id": "candidate_entity_id", "candidate_source": "candidate_source"},
-  "source_store": "artifacts/source-store.sqlite",
+  "source_store": "artifacts/source-store-test.sqlite",
   "reuse_from": ["artifacts/neural-scores/threshold"],
   "device": "cuda",
   "max_tokens": 16384,

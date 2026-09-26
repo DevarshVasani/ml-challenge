@@ -154,7 +154,7 @@ class Context:
     route_column: str | None
     route_value: str
     require_route: bool
-    source_store: str | None
+    text_source: Any                      # SourceStore path or RecordTable; used only for key-only shards
     reuse: ReuseCache
 
 
@@ -194,13 +194,54 @@ def _select(frame: pd.DataFrame, ctx: Context, where: str) -> pd.DataFrame:
     return frame
 
 
-def _join_text(frame: pd.DataFrame, store_path: str) -> tuple[pd.DataFrame, np.ndarray]:
-    """Attach the six text fields from the source store; returns (frame, missing mask)."""
+class RecordTable:
+    """In-memory text from B's records files: source, record_id (or entity_id), business_name, business_address, country.
+
+    Mirrors SourceStore.lookup so both feed the same record_text mapping. Holds
+    every row in memory; for the full test set prefer a SQLite source store.
+    """
+
+    TEXT = ("business_name", "business_address", "country")
+
+    def __init__(self, paths: Sequence[str | os.PathLike[str]]):
+        frames = []
+        for path in map(Path, paths):
+            frame = pd.read_parquet(path) if path.suffix.lower() in {".parquet", ".pq"} else pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, na_filter=False)
+            frame = frame.rename(columns={"entity_id": "record_id"})
+            if not {"source", "record_id"}.issubset(frame.columns):
+                raise ValueError(f"{path}: records need source and record_id columns")
+            frames.append(frame[["source", "record_id", *[c for c in self.TEXT if c in frame.columns]]])
+        table = pd.concat(frames, ignore_index=True)
+        if table.duplicated(["source", "record_id"]).any():
+            raise ValueError("records contain duplicate (source, record_id)")
+        table.index = table["source"].astype(str) + "\x1f" + table["record_id"].astype(str)
+        self.table = table.drop(columns=["source", "record_id"]).fillna("").astype(str)
+
+    def __enter__(self) -> "RecordTable":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def __len__(self) -> int:
+        return len(self.table)
+
+    def lookup(self, source: str, entity_ids) -> dict[str, dict[str, str]]:
+        ids = list(dict.fromkeys(map(str, entity_ids)))
+        keys = pd.Index([f"{source}\x1f{i}" for i in ids])
+        present = keys.isin(self.table.index)
+        found = self.table.reindex(keys[present]).to_dict(orient="records")
+        return dict(zip((i for i, ok in zip(ids, present) if ok), found))
+
+
+def _join_text(frame: pd.DataFrame, text_source) -> tuple[pd.DataFrame, np.ndarray]:
+    """Attach the six text fields via record_text; returns (frame, missing mask)."""
     from .source_store import SourceStore, record_text
 
-    with SourceStore(store_path) as store:
+    with (SourceStore(text_source) if isinstance(text_source, (str, os.PathLike)) else text_source) as store:
         s1 = store.lookup("S1", frame["source1_entity_id"].unique().tolist())
-        candidates = store.lookup_many({str(src): ids.unique().tolist() for src, ids in frame.groupby("candidate_source", sort=False)["candidate_entity_id"]})
+        candidates = {(str(src), cid): payload for src, ids in frame.groupby("candidate_source", sort=False)["candidate_entity_id"]
+                      for cid, payload in store.lookup(str(src), ids.unique().tolist()).items()}
     empty_a, empty_b = record_text({}, "a"), record_text({}, "b")
     left = [record_text(s1[sid], "a") if sid in s1 else None for sid in frame["source1_entity_id"]]
     right = [record_text(candidates[(src, cid)], "b") if (src, cid) in candidates else None for src, cid in zip(frame["candidate_source"], frame["candidate_entity_id"])]
@@ -226,9 +267,9 @@ def prepare_frame(frame: pd.DataFrame, ctx: Context, name: str, *, stale: ReuseC
     n = len(frame)
     missing = np.zeros(n, bool)
     if not all(c in frame.columns for c in TEXT_FIELDS):
-        if not ctx.source_store:
-            raise ValueError(f"{name}: shard has no text columns and no source_store is configured")
-        frame, missing = _join_text(frame, ctx.source_store)
+        if ctx.text_source is None:
+            raise ValueError(f"{name}: shard has no text columns; configure records or source_store")
+        frame, missing = _join_text(frame, ctx.text_source)
     timings["join_seconds"] = time.perf_counter() - tick
 
     tick = time.perf_counter()
@@ -381,15 +422,27 @@ def _load(config: Mapping[str, Any]):
     return adapter, checkpoint_id, identity
 
 
+def _as_list(value) -> list[str]:
+    return [str(v) for v in value] if isinstance(value, list) else [str(value)]
+
+
+def _text_source(config: Mapping[str, Any]):
+    if config.get("records") and config.get("source_store"):
+        raise ValueError("configure records or source_store, not both")
+    if config.get("records"):
+        return RecordTable(_as_list(config["records"]))
+    return str(config["source_store"]) if config.get("source_store") else None
+
+
 def _context(config: Mapping[str, Any], adapter, checkpoint_id: str, reuse: ReuseCache) -> tuple[Context, dict[str, Any]]:
     signature = {"checkpoint_id": checkpoint_id, "input_signature": input_signature(adapter), "precision": getattr(adapter, "inference_precision", "fp32")}
     route_column = config.get("route_column", "route")
     ctx = Context(adapter=adapter, checkpoint_id=checkpoint_id, cache_prefix=config_hash(signature).encode(),
                   key_columns={k: str(v) for k, v in dict(config.get("key_columns", {})).items()},
                   route_column=str(route_column) if route_column else None, route_value=str(config.get("route_value", "neural")),
-                  require_route=bool(config.get("require_route", False)), source_store=config.get("source_store"), reuse=reuse)
+                  require_route=bool(config.get("require_route", False)), text_source=_text_source(config), reuse=reuse)
     scoring_identity = {"schema_version": SCHEMA_VERSION, **signature, "route": [ctx.route_column, ctx.route_value], "key_columns": ctx.key_columns,
-                        "source_store": file_identity(ctx.source_store) if ctx.source_store else None}
+                        "text_source": {key: [file_identity(p) for p in _as_list(config[key])] for key in ("records", "source_store") if config.get(key)}}
     return ctx, scoring_identity
 
 
