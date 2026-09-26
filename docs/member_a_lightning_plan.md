@@ -4,6 +4,23 @@ Run steps in order on the T4 Studio. Commands and the output contract are in
 `docs/member_a_runbook.md`; this is the sequence, the checks, and what to send
 whom. Run everything long inside `tmux` so a closed tab does not kill it.
 
+## Progress so far
+
+| Step | State | Result |
+|---|---|---|
+| 0. Setup | done | torch/transformers match the training provenance |
+| 1. Checkpoint card | done | `ckpt-e315e181e5896f9c`, `inputs_verified=true`, 0 held-out queries seen in training |
+| 2. T4 benchmark | done | 1,028 pairs/s fp16 at `max_tokens=16384`, peak 3.9 GB, 0 OOM (table in step 2) |
+| 3. Threshold logits | **do now** | does not depend on C (see step 3) |
+| 3b. B starter rehearsal | **do after 3** | laptop check passed; confirm on the Studio |
+| 3c. Test source store | **start now** (CPU) | needed before any test route shard can be scored |
+| 4–5. C's route shards | **blocked on C** | need C's route schema and routed pair count; do not `--execute` production before the budget check in step 2 |
+
+While waiting for C: B's machine has no GPU and a 13.6 GiB memory limit,
+so B's new reverse retrieval, and therefore C's routed pair count, may arrive
+later than the plan's timeline. Use that time for 3, 3b and 3c; nothing else
+on A's side is blocked.
+
 ## 0. Setup (≈10 min) — before hour 0:30
 
 ```bash
@@ -23,7 +40,16 @@ python -c "import json,torch,transformers; p=json.load(open('artifacts/neural-md
 ```
 
 If `transformers` differs, `pip install transformers==<trained version>`
-before scoring anything. Do not touch `artifacts/neural-mdeberta/`; copy it
+before scoring anything.
+
+Loading the checkpoint prints `The tokenizer you are loading ... with an
+incorrect regex pattern ... set fix_mistral_regex=True`. **Do not set that
+flag or change the tokenizer.** Training and scoring load the same
+`tokenizer.json` under the same versions, so they tokenize identically;
+changing it now would create exactly the drift this step guards against. A
+0% truncation rate is not evidence about tokenization; the step-3 comparison
+with the pilot predictions is. Mention the warning to the team only as
+"known, left unchanged on purpose". Do not touch `artifacts/neural-mdeberta/`; copy it
 aside first if you will run the optional continuation (step 6).
 
 ## 1. Checkpoint card → D (≈5 min) — by hour 0:30
@@ -63,7 +89,64 @@ python -m src.score_neural --config configs/neural/score_mdeberta_threshold.json
 - If projected hours for C's routed pairs exceed ≈ 8, tell C and D now: the
   gate must get tighter or D plans a tree-only route for part of the data.
 
-## 3. Threshold logits → D (≈ 993k / measured pairs/s) — start by hour 2
+### Measured on the T4 (checkpoint `ckpt-e315e181e5896f9c`, fp16)
+
+| `max_tokens` | pairs/s | OOM splits | peak reserved |
+|---|---|---|---|
+| 8192 | 922 | 0 | 3.90 GB |
+| **16384** | **1,028** | 0 | 3.90 GB |
+| 32768 | 991 | 0 | 4.28 GB |
+
+Use `max_tokens=16384` (already the config default). 32K is slower and uses
+more memory. Throughput is flat across budgets and peak memory is 3.9 of
+16 GB: the GPU is saturated, so larger batches will not help.
+
+Projection for 34.7M pairs: 9.38 h overlapped, 10.96 h serial. The serial
+figure is about 17% higher, meaning CPU prep on the Studio is slower than on
+the laptop but still hidden behind the GPU by the shard prefetch.
+
+### The time budget in real numbers
+
+The 34.7M figure is the **old** plan's assumption (1,732,544 test S1 queries
+× 20 candidates). The new plan routes about the top S1 candidates per S2/S3
+record, so the pair count scales with test S2 + S3 records:
+
+| Test file | Records |
+|---|---|
+| S2 | 4,887,273 |
+| S3 | 5,082,316 |
+| **S2 + S3** | **9,969,589** |
+
+Upper bounds at 1,028 pairs/s (fewer when a record has fewer candidates, more
+if C widens near-ties):
+
+| Gate | Pairs (max) | Hours |
+|---|---|---|
+| top-1 per record | 10.0M | 2.7 |
+| top-2 per record | 19.9M | 5.4 |
+| **top-3 per record** | **29.9M** | **8.1** |
+| old 34.7M assumption | 34.7M | 9.4 |
+
+A plain top-3 gate sits right at the 8-hour limit. Tell C and D now: to get
+margin, some routes must skip the neural model, either confident tree-only
+rejects (especially 3rd-ranked candidates with a large score gap) or top-2
+plus top-3 only where scores are close. The real budget is
+`routed_pairs / 1028 / 3600` hours once C reports the routed count.
+
+### If the budget is still too tight
+
+- A second GPU halves the time: run a second scorer over half of C's shards
+  (split the `pairs` glob) with **its own `output_dir`**. Two scorers must
+  never share one output dir. D reads both manifests; both carry the same
+  `checkpoint_id`.
+- Do not lower `max_length` (nothing is truncated; bucketing already skips
+  padding) and do not raise `max_tokens` (the GPU is saturated).
+
+## 3. Threshold logits → D (≈ 16–20 min at 1,028 pairs/s) — do now
+
+The 8-hour gate applies only to production scoring of C's routed pairs
+(step 5). Threshold scoring is 993k pairs, does not depend on C, and D needs
+these logits to start calibration and fusion. Do not hold it back.
 
 ```bash
 python -m src.score_neural --config configs/neural/score_mdeberta_threshold.json --execute | tee artifacts/score-threshold.log
@@ -158,6 +241,19 @@ python -c "import json; m=json.load(open('artifacts/neural-scores/routes-v1/neur
 Any `missing_record` or `nonfinite` counts in the log go to B (missing IDs)
 or stay flagged for D (non-finite); never patch them by hand.
 
+4. Re-benchmark on C's route shards before trusting the production
+   projection. The step-2 benchmark used threshold shards that already carry
+   text; key-only route shards add a source-store lookup per pair that was not
+   measured:
+
+```bash
+python -m src.score_neural --config configs/neural/score_mdeberta_routes.json \
+  --benchmark 10000 --project-pairs <C's routed pair count>
+```
+
+   If `bottleneck` becomes `cpu_prepare`, tell D: the projection is then the
+   serial figure, not the overlapped one.
+
 ## 5. Production scoring — hours 6–20
 
 Once the candidate/route version is frozen, loop the scorer while C publishes:
@@ -193,6 +289,16 @@ by hour 10**; after that no new checkpoint enters production.
 - Tell D the exact output dir to use and that no other checkpoint ID exists in
   it.
 
+## Data and repo rules
+
+- B's package, pair shards, stores, checkpoints and score outputs never go
+  into Git (`member-b-starter-v1/` holds D's evaluation truth). Share paths
+  and checksums instead.
+- A never opens `evaluation_truth.tsv` or `train_labels.parquet`, and never
+  tunes anything on `final`.
+- `src/neural_error_analysis.py` (used by the older Lightning runbook's
+  error-analysis step) is not on this branch yet; push it separately if needed.
+
 ## Status message template (to the team channel)
 
 ```
@@ -204,4 +310,18 @@ b-starter rehearsal: <cached>/25428 cached, <missing> missing (expect 25428 / 0)
 test source store: <building / done, N records>
 routes: <version> <done>/<total> shards, <rows> rows, missing_record=<n>, nonfinite=<n>, ETA <time>
 blockers: <none | what I need from B/C/D>
+```
+
+Current message (fill in the hour and the threshold ETA):
+
+```
+A status @ hour <h>
+checkpoint: ckpt-e315e181e5896f9c (inputs_verified=true, 0 held-out queries seen in training)
+throughput: 1,028 pairs/s on T4 fp16, max_tokens=16384, peak 3.9 GB, 0 OOM (8192/16384/32768 all 0)
+threshold logits: running now -> artifacts/neural-scores/threshold, ETA ~20 min
+budget: test S2+S3 = 9.97M records. Top-3/record <= 29.9M pairs = ~8.1h (at the 8h limit);
+        top-2 <= 19.9M = ~5.4h. Need C's routed count; tree-only rejects on rank 3 would give margin.
+        (the 34.7M / 9.4h figure is the old S1x20 assumption, not this plan)
+tokenizer: "incorrect regex pattern" warning is known; left unchanged on purpose (matches training)
+blockers: C's route shard schema + routed count; test source store building (step 3c)
 ```
