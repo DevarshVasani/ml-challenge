@@ -308,3 +308,23 @@ def test_manifest_shard_paths_accept_relative_and_bare_entries(tmp_path):
     expected = [str(tmp_path / "train_pairs" / "pairs-a.parquet")]
     assert manifest_shard_paths(manifest, ["train_pairs/pairs-a.parquet"], "train_pairs") == expected
     assert manifest_shard_paths(manifest, ["pairs-a.parquet"], "train_pairs") == expected
+
+
+def test_error_analysis_separates_retrieval_misses_and_tags_matcher_errors():
+    from src.neural_error_analysis import analyze
+    pairs = pd.DataFrame([
+        _pair("S1-1", "S2-1", label=1),                                                     # true match, scored low -> false negative
+        {**_pair("S1-1", "S2-2", label=0), "name_b": "Café NA", "address_b": "002"},         # same name, other number -> false positive
+        _pair("S1-2", "S2-3", label=0),                                                      # singleton query, predicted -> singleton FP
+    ])
+    scores = pd.DataFrame({"source1_entity_id": ["S1-1", "S1-1", "S1-2"], "candidate_entity_id": ["S2-1", "S2-2", "S2-3"], "candidate_source": "S2", "score": [0.2, 0.9, 0.8]})
+    gt = {"S1-1": ["S2-1", "S3-9"], "S1-2": []}
+    meta = {"S1-1": {"country": "France", "singleton": False}, "S1-2": {"country": "France", "singleton": True}}
+    summary, buckets = analyze(pairs, scores, gt, ["S1-1", "S1-2"], meta, threshold=0.5)
+    assert summary["retrieval_misses"] == 1 and summary["candidate_recall"] == 0.5
+    assert list(buckets["retrieval_misses"]["missing_candidate_entity_id"]) == ["S3-9"]
+    assert list(buckets["false_negatives"]["candidate_entity_id"]) == ["S2-1"]
+    assert list(buckets["false_positives"]["candidate_entity_id"]) == ["S2-2", "S2-3"]
+    fp = buckets["false_positives"].set_index("candidate_entity_id")
+    assert fp.loc["S2-2", "same_name"] and fp.loc["S2-2", "number_conflict"]
+    assert summary["singleton_false_positive_queries"] == 1

@@ -15,7 +15,7 @@ spm = pytest.importorskip("sentencepiece")
 pytest.importorskip("google.protobuf")
 
 from src.neural_adapters import AdapterConfig, get_adapter_class
-from src.neural_adapters.mdeberta import MDebertaPairAdapter
+from src.neural_adapters.mdeberta import MDebertaPairAdapter, select_inference_precision
 from src.neural_models import NeuralTrainingConfig, predict_pairs, train_neural
 
 CORPUS = [
@@ -60,6 +60,22 @@ def test_registry_and_dry_run_guard():
     assert get_adapter_class("mdeberta") is MDebertaPairAdapter
     with pytest.raises(RuntimeError, match="--execute"):
         MDebertaPairAdapter.from_config(AdapterConfig("mdeberta"))
+
+
+def test_inference_precision_follows_compute_capability():
+    assert select_inference_precision(None) == "fp32"          # CPU
+    assert select_inference_precision((7, 5)) == "fp16"        # T4
+    assert select_inference_precision((8, 6)) == "bf16"        # A10G
+    assert select_inference_precision((8, 9)) == "bf16"        # L4
+    assert select_inference_precision((6, 0)) == "fp32"        # P100
+    assert select_inference_precision((7, 5), "fp32") == "fp32"  # forced fallback on T4
+    assert select_inference_precision(None, "fp16") == "fp32"    # CPU ignores the override
+    with pytest.raises(ValueError):
+        select_inference_precision((7, 5), "int8")
+
+
+def test_cpu_adapter_runs_fp32_inference(tiny_checkpoint):
+    assert _adapter(tiny_checkpoint).inference_precision == "fp32"
 
 
 def test_serialization_order_missing_values_and_literal_text(tiny_checkpoint):

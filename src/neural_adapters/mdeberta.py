@@ -7,6 +7,7 @@ help/dry-run commands keep working on machines without the GPU extra.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import fields
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -20,6 +21,7 @@ SIDE_B = ("name_b", "address_b", "country_b")
 MODEL_INPUTS = ("input_ids", "attention_mask", "token_type_ids")
 ADAPTER_FILE = "adapter_config.json"
 SERIALIZATION_VERSION = "mdeberta-pair-1"
+PRECISION_ENV = "MDEBERTA_INFERENCE_PRECISION"
 
 
 def _require_runtime():
@@ -29,6 +31,22 @@ def _require_runtime():
     except ImportError as exc:
         raise RuntimeError("mDeBERTa adapter requires torch, transformers, sentencepiece and protobuf; install requirements-gpu.txt on the compute machine") from exc
     return torch, transformers
+
+
+def select_inference_precision(capability: tuple[int, int] | None, override: str | None = None) -> str:
+    """bf16 on Ampere+ (A10G, L4, A100), fp16 on Turing/Volta tensor cores (T4), else fp32.
+
+    torch.cuda.is_bf16_supported() also counts software emulation, which is
+    true but slow on a T4, so the choice is made from compute capability.
+    ``override`` (from MDEBERTA_INFERENCE_PRECISION) forces a GPU choice.
+    """
+    if capability is None:
+        return "fp32"
+    if override and override != "auto":
+        if override not in {"bf16", "fp16", "fp32"}:
+            raise ValueError(f"{PRECISION_ENV} must be auto, bf16, fp16 or fp32, got {override!r}")
+        return override
+    return "bf16" if capability[0] >= 8 else "fp16" if capability[0] >= 7 else "fp32"
 
 
 def _is_missing(value: Any) -> bool:
@@ -70,6 +88,7 @@ class MDebertaPairAdapter(BasePairAdapter):
             "torch_version": torch.__version__,
         }
         self.device = torch.device("cpu")
+        self.inference_precision = "fp32"
         self.to_device(config.device)
 
     # -- serialization -------------------------------------------------
@@ -119,9 +138,10 @@ class MDebertaPairAdapter(BasePairAdapter):
         torch = self._torch
         inputs = {key: batch[key] for key in MODEL_INPUTS if key in batch}
         # The shared trainer supplies autocast while training; shared inference
-        # runs without it, so eval on a BF16-capable GPU autocasts here.
-        if not self.model.training and self.device.type == "cuda" and torch.cuda.is_bf16_supported():
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        # runs without it, so eval on a GPU autocasts here (bf16, or fp16 on T4).
+        if not self.model.training and self.inference_precision != "fp32":
+            dtype = torch.bfloat16 if self.inference_precision == "bf16" else torch.float16
+            with torch.autocast(device_type="cuda", dtype=dtype):
                 return self.model(**inputs).logits.float()
         return self.model(**inputs).logits
 
@@ -132,6 +152,8 @@ class MDebertaPairAdapter(BasePairAdapter):
         self.device = self._torch.device(device)
         self.config.device = str(device)
         self.model.to(self.device)
+        capability = self._torch.cuda.get_device_capability(self.device) if self.device.type == "cuda" else None
+        self.inference_precision = select_inference_precision(capability, os.environ.get(PRECISION_ENV))
         return self
 
     def supports_gradient_checkpointing(self) -> bool:

@@ -109,7 +109,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     parser.add_argument("--max-length", type=int, default=256)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--precision", default=None, help="bf16 on CUDA, fp32 on CPU by default")
+    parser.add_argument("--precision", default=None, help="training precision; default bf16 on A10G/L4/A100, fp16 on T4, fp32 on CPU")
     parser.add_argument("--sample", type=int, default=5000, help="pairs used for length profile and throughput")
     parser.add_argument("--overfit-rows", type=int, default=16)
     parser.add_argument("--overfit-epochs", type=int, default=30)
@@ -123,11 +123,11 @@ def main() -> None:
     if output.exists() and any(output.iterdir()):
         parser.error(f"refusing to overwrite non-empty {output}; pass a new --output-dir")
     output.mkdir(parents=True, exist_ok=True)
-    precision = args.precision or ("bf16" if args.device.startswith("cuda") else "fp32")
-    report: dict = {"checkpoint": args.checkpoint, "device": args.device, "precision": precision, "max_length": args.max_length, "checks": {}}
 
     tick = time.perf_counter()
     adapter = MDebertaPairAdapter(AdapterConfig("mdeberta", checkpoint=args.checkpoint, max_length=args.max_length, device=args.device))
+    precision = args.precision or adapter.inference_precision
+    report: dict = {"checkpoint": args.checkpoint, "device": args.device, "precision": precision, "inference_precision": adapter.inference_precision, "max_length": args.max_length, "checks": {}}
     report["load_seconds"] = time.perf_counter() - tick
     report["provenance"] = adapter.provenance
     report["parameters_millions"] = sum(p.numel() for p in adapter.parameters()) / 1e6
