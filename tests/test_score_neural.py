@@ -83,7 +83,8 @@ def test_route_shards_join_text_and_flag_missing_records(tmp_path):
                           "route": ["neural", "neural", "neural", "neural", "tree_only"], "tree_score": [0.9, 0.8, 0.7, 0.5, 0.01]})
     route.to_parquet(tmp_path / "route-0001.parquet", index=False)
     config = _config(tmp_path, [str(tmp_path / "route-0001.parquet")], source_store=str(store),
-                     key_columns={"source1_entity_id": "s1_id", "candidate_entity_id": "source_record_id", "candidate_source": "source"})
+                     key_columns={"source1_entity_id": "s1_id", "candidate_entity_id": "source_record_id", "candidate_source": "source"},
+                     max_missing_fraction=0.5)
     result = execute(config, **QUIET)
     scores = _read(tmp_path / "scores").set_index("candidate_entity_id")
     assert len(scores) == 4 and "S2-002" in scores.index and scores.loc["S2-002", "source1_entity_id"] == "S1-002"  # tree_only row dropped
@@ -194,8 +195,14 @@ def test_records_files_give_same_text_as_source_store(tmp_path):
     SourceStore.build({s: str(store_dir / f"{s}.tsv") for s in ("S1", "S2", "S3")}, tmp_path / "store.sqlite")
     pairs = pd.DataFrame({"source1_entity_id": ["S1-001", "S1-001", "S1-002"], "candidate_entity_id": ["S2-001", "S3-001", "S2-404"], "candidate_source": ["S2", "S3", "S2"]})
     pairs.to_parquet(tmp_path / "keys.parquet", index=False)
-    via_records = execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), output_dir=str(tmp_path / "a")), **QUIET)
-    execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], source_store=str(tmp_path / "store.sqlite"), output_dir=str(tmp_path / "b")), **QUIET)
+    via_records = execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), output_dir=str(tmp_path / "a"), max_missing_fraction=0.5), **QUIET)
+    execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], source_store=str(tmp_path / "store.sqlite"), output_dir=str(tmp_path / "b"), max_missing_fraction=0.5), **QUIET)
+    # The default guard refuses a shard whose text source misses a third of its pairs, and writes nothing.
+    with pytest.raises(ValueError, match="wrong split"):
+        execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), output_dir=str(tmp_path / "guard")), **QUIET)
+    assert not list((tmp_path / "guard").glob("*.neural.parquet"))
+    with pytest.raises(ValueError, match="wrong split|reached the model"):
+        benchmark(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), output_dir=str(tmp_path / "guard")), pairs=3, **QUIET)
     a, b = _read(tmp_path / "a"), _read(tmp_path / "b")
     assert via_records["missing_record"] == 1 and a["neural_status"].tolist() == ["scored", "scored", "missing_record"]
     assert a["cache_key"].tolist() == b["cache_key"].tolist()  # identical key + model text (None name -> "")

@@ -228,9 +228,10 @@ class RecordTable:
 
     def lookup(self, source: str, entity_ids) -> dict[str, dict[str, str]]:
         ids = list(dict.fromkeys(map(str, entity_ids)))
-        keys = pd.Index([f"{source}\x1f{i}" for i in ids])
-        present = keys.isin(self.table.index)
-        found = self.table.reindex(keys[present]).to_dict(orient="records")
+        # get_indexer reuses the index's hash table, built once; isin/reindex rebuild it per call.
+        positions = self.table.index.get_indexer([f"{source}\x1f{i}" for i in ids])
+        present = positions >= 0
+        found = self.table.iloc[positions[present]].to_dict(orient="records")
         return dict(zip((i for i, ok in zip(ids, present) if ok), found))
 
 
@@ -411,6 +412,17 @@ def _write_atomic(frame: pd.DataFrame, target: Path) -> str:
 
 # -- orchestration ----------------------------------------------------------
 
+def check_missing(prepared: Prepared, config: Mapping[str, Any]) -> None:
+    """Stop early when the text source does not cover the shard (usually the wrong split's store)."""
+    rows = len(prepared.status)
+    missing = int((prepared.status == MISSING_RECORD).sum())
+    limit = float(config.get("max_missing_fraction", 0.01))
+    if rows and missing / rows > limit:
+        source = {k: config[k] for k in ("records", "source_store") if config.get(k)}
+        raise ValueError(f"{prepared.name}: {missing:,} of {rows:,} pairs ({missing / rows:.1%}) have no record in the text source {source}; "
+                         f"limit is max_missing_fraction={limit}. Most likely the text source is for the wrong split "
+                         f"(e.g. the test store for train/threshold IDs). Nothing was written.")
+
 def _load(config: Mapping[str, Any]):
     adapter_type = str(config.get("adapter_type", ""))
     if adapter_type.lower() in {"fake", "smoke"} and not bool(config.get("smoke", False)):
@@ -501,6 +513,7 @@ def execute(config: Mapping[str, Any], *, rescore_changed: bool = False, log=pri
         future = submit(head) if head else None
         while future is not None:
             prepared = future.result()
+            check_missing(prepared, config)
             following = next(queue, None)
             future = submit(following) if following else None  # prefetch while the GPU works
             stats = score_prepared(adapter, prepared, max_tokens=max_tokens, max_rows=max_rows)
@@ -561,7 +574,11 @@ def benchmark(config: Mapping[str, Any], *, pairs: int, max_tokens_sweep: Sequen
     cuda = torch.cuda.is_available() and str(config.get("device", "cpu")).startswith("cuda")
     sample, read_seconds, _ = _sample_rows(ready, ctx, pairs)
     prepared = prepare_frame(sample, ctx, "benchmark")
+    check_missing(prepared, config)
     n = len(prepared.todo)
+    if not n:
+        raise ValueError(f"none of the {len(sample):,} sampled pairs reached the model "
+                         f"(statuses: {pd.Series(prepared.status).value_counts().to_dict()}); nothing to benchmark")
     sweep = list(max_tokens_sweep or [int(config.get("max_tokens", 16384))])
     max_rows = int(config.get("max_batch_rows", 512))
     # Warm up kernels/allocator on the widest batch; not timed.
@@ -592,7 +609,7 @@ def benchmark(config: Mapping[str, Any], *, pairs: int, max_tokens_sweep: Sequen
     lengths = prepared.token_length[prepared.token_length >= 0]
     report = {
         "checkpoint_id": checkpoint_id, "device": torch.cuda.get_device_name() if cuda else "cpu", "precision": scoring_identity["precision"],
-        "sample_pairs": rows, "stage_seconds": {**cpu, "forward": best["forward_seconds"]},
+        "sample_pairs": rows, "model_pairs": n, "status_counts": pd.Series(prepared.status).value_counts().to_dict(), "stage_seconds": {**cpu, "forward": best["forward_seconds"]},
         "pairs_per_second_serial": 1.0 / (per_pair_cpu + per_pair_gpu),
         "pairs_per_second_overlapped": 1.0 / max(per_pair_cpu, per_pair_gpu),
         "bottleneck": "gpu_forward" if per_pair_gpu >= per_pair_cpu else "cpu_prepare",

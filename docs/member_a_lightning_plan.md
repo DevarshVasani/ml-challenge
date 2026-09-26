@@ -236,12 +236,29 @@ Text for these key-only train-split pairs comes from the historical threshold
 shards themselves, so it is exactly the model's training-format text (checked
 on the laptop: 963,843 routed pairs, 0 missing, 0 text mismatches):
 
+**Put C's file in `artifacts/c-threshold-gate-v1/`, not `artifacts/tree-routes/`.**
+`tree-routes/test-v1/` is the production glob of `score_mdeberta_routes.json`,
+whose text source is the **test** store. A threshold file there gets scored
+as if it were a test shard and every pair comes out `missing_record`. (That
+happened on the Studio: the benchmark reported `model_pairs: 0`,
+`forward: 0.0` and a meaningless 71,882 pairs/s. The scorer now stops with
+"have no record in the text source … wrong split" instead.)
+
 ```bash
-mkdir -p artifacts/c-threshold-gate-v1   # put C's threshold_gate_v1.parquet here
+mkdir -p artifacts/c-threshold-gate-v1
+mv artifacts/tree-routes/v1/threshold_gate_v1.parquet artifacts/c-threshold-gate-v1/ 2>/dev/null || true
 sha256sum artifacts/c-threshold-gate-v1/threshold_gate_v1.parquet   # f99ad4e3530c78df…
 python -m src.records_from_pairs --pair-manifest artifacts/neural-data/threshold_pairs_manifest.json \
   --pair-subdir threshold_pairs --output artifacts/neural-data/threshold_records_from_pairs.parquet
 python -m src.score_neural --config configs/neural/score_mdeberta_gate_threshold.json --execute | tee artifacts/score-gate-threshold.log
+```
+
+Optional CPU/GPU check of the key-only path first (must show
+`model_pairs: 10000`, `status_counts: {scored: 10000}`, `bottleneck: gpu_forward`;
+on the laptop the records join cost 0.22 s per 10k pairs):
+
+```bash
+python -m src.score_neural --config configs/neural/score_mdeberta_gate_threshold.json --benchmark 10000 --project-pairs 963843
 ```
 
 Expect `rows: 963843`, `cached: 963843`, `model_pairs: 0`, `missing_record: 0`
@@ -348,6 +365,21 @@ by hour 10**; after that no new checkpoint enters production.
   sidecars); do not copy indexes or checkpoints around.
 - Tell D the exact output dir to use and that no other checkpoint ID exists in
   it.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Error "… have no record in the text source … wrong split" | the text source does not hold these IDs (test store for train/threshold IDs, or B's 64-query sample records for full threshold) | use the matching config: threshold/gate files use `score_mdeberta_gate_threshold.json`; test routes use `score_mdeberta_routes.json` |
+| Benchmark "none of the sampled pairs reached the model" | every sampled row was `missing_record` or cached | same as above; the benchmark has no reuse cache, so it is always the text source |
+| Error "input shard changed since it was scored" | the file was replaced after scoring | confirm with C, then `--rescore-changed` |
+| Error "different checkpoint/input format/route" | output dir belongs to another checkpoint or route setting | use a new `output_dir` |
+| `ready_inputs: 0` in `--dry-run` for routes | C's shards lack `.complete.json` | ask C to publish sidecars; never hand-create them for unfinished shards |
+
+A shard is refused, with nothing written, when more than
+`max_missing_fraction` (default 0.01) of its routed pairs have no text. Raise
+it in the config only for a known, reported gap, never to get past a
+wrong-split store.
 
 ## Data and repo rules
 

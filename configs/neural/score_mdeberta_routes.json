@@ -1,7 +1,7 @@
 {
   "adapter_type": "mdeberta",
   "checkpoint": "artifacts/neural-mdeberta",
-  "pairs": "artifacts/tree-routes/v1/*.parquet",
+  "pairs": "artifacts/tree-routes/test-v1/*.parquet",
   "require_complete_sidecar": true,
   "route_column": "route",
   "route_value": "neural",
