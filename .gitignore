@@ -107,3 +107,5 @@ audit_output/match_cardinality.tsv
 # Environment
 .env
 venv/
+
+neural-data/
