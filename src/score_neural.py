@@ -455,7 +455,16 @@ def _context(config: Mapping[str, Any], adapter, checkpoint_id: str, reuse: Reus
                   require_route=bool(config.get("require_route", False)), text_source=_text_source(config), reuse=reuse)
     scoring_identity = {"schema_version": SCHEMA_VERSION, **signature, "route": [ctx.route_column, ctx.route_value], "key_columns": ctx.key_columns,
                         "text_source": {key: [file_identity(p) for p in _as_list(config[key])] for key in ("records", "source_store") if config.get(key)}}
-    return ctx, scoring_identity
+    return ctx, normalized_identity(scoring_identity)
+
+
+def normalized_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop fields that are empty, so an unused text source never makes two runs look different.
+
+    Output dirs started before the ``records`` option recorded ``source_store: None``
+    where current runs record ``text_source: {}``; both mean "no text source".
+    """
+    return {key: value for key, value in identity.items() if not (key in {"text_source", "source_store"} and not value)}
 
 
 def plan(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -477,9 +486,13 @@ def execute(config: Mapping[str, Any], *, rescore_changed: bool = False, log=pri
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None
     if manifest is None and any(output.glob(f"*{OUTPUT_SUFFIX}")):
         raise FileExistsError(f"{output} has score shards but no {MANIFEST}; refusing to mix")
-    if manifest is not None and manifest.get("scoring_identity_hash") != scoring_hash:
-        raise ValueError(f"{output} was scored with a different checkpoint/input format/route; use a new output_dir "
-                         f"(existing {manifest.get('checkpoint_id')}, now {checkpoint_id})")
+    if manifest is not None:
+        existing = normalized_identity(manifest.get("scoring_identity", {}))
+        if config_hash(existing) != scoring_hash:
+            differs = sorted(k for k in set(existing) | set(scoring_identity) if existing.get(k) != scoring_identity.get(k))
+            raise ValueError(f"{output} was scored with different settings ({', '.join(differs)}); use a new output_dir. "
+                             f"Existing: { {k: existing.get(k) for k in differs} } Now: { {k: scoring_identity.get(k) for k in differs} }")
+        manifest.update(scoring_identity=scoring_identity, scoring_identity_hash=scoring_hash)
     manifest = manifest or {"schema_version": SCHEMA_VERSION, "kind": "neural-scores", "checkpoint_id": checkpoint_id, "checkpoint": str(config["checkpoint"]),
                             "checkpoint_identity_hash": ckpt_identity["identity_hash"], "scoring_identity": scoring_identity,
                             "scoring_identity_hash": scoring_hash, "score_definition": "neural_logit = logit[match] - logit[no_match]; sigmoid(neural_logit) = P(match)",

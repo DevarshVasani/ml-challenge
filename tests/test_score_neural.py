@@ -130,7 +130,7 @@ def test_changed_input_refuses_unless_rescored_and_checkpoint_change_refuses(tmp
     result = execute(config, rescore_changed=True, **QUIET)
     assert result["cached"] == 2 and result["model_pairs"] == 1 and len(_read(tmp_path / "scores")) == 3
     config["checkpoint"] = _checkpoint(tmp_path / "ckpt-other", seed=9)
-    with pytest.raises(ValueError, match="different checkpoint"):
+    with pytest.raises(ValueError, match=r"different settings \(checkpoint_id"):
         execute(config, **QUIET)
 
 
@@ -228,3 +228,18 @@ def test_records_rebuilt_from_pair_shards_reproduce_pair_text(tmp_path):
     conflicting.to_parquet(tmp_path / "bad.parquet", index=False)
     with pytest.raises(ValueError, match="conflicting text"):
         records_from_pairs([str(tmp_path / "bad.parquet")])
+
+
+def test_output_dir_from_before_records_option_still_resumes(tmp_path):
+    pd.DataFrame([_pair("S1-1", "S2-1"), _pair("S1-1", "S2-2")]).to_parquet(tmp_path / "p.parquet", index=False)
+    config = _config(tmp_path, [str(tmp_path / "p.parquet")])
+    execute(config, **QUIET)
+    manifest_path = tmp_path / "scores" / "neural_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    legacy = {**manifest["scoring_identity"], "source_store": None}  # how pre-records runs recorded "no text source"
+    legacy.pop("text_source", None)
+    manifest.update(scoring_identity=legacy, scoring_identity_hash="legacy-hash")
+    manifest_path.write_text(json.dumps(manifest))
+    assert execute(config, **QUIET)["shards_resumed"] == 1
+    with pytest.raises(ValueError, match=r"different settings \(route\)"):
+        execute({**config, "route_value": "tree_only"}, **QUIET)

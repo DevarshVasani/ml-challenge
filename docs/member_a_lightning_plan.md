@@ -381,7 +381,8 @@ by hour 10**; after that no new checkpoint enters production.
 | Error "… have no record in the text source … wrong split" | the text source does not hold these IDs (test store for train/threshold IDs, or B's 64-query sample records for full threshold) | use the matching config: threshold/gate files use `score_mdeberta_gate_threshold.json`; test routes use `score_mdeberta_routes.json` |
 | Benchmark "none of the sampled pairs reached the model" | every sampled row was `missing_record` or cached | same as above; the benchmark has no reuse cache, so it is always the text source |
 | Error "input shard changed since it was scored" | the file was replaced after scoring | confirm with C, then `--rescore-changed` |
-| Error "different checkpoint/input format/route" | output dir belongs to another checkpoint or route setting | use a new `output_dir` |
+| Error "was scored with different settings (<fields>)" | the output dir was made with another checkpoint, input format, precision, route, key mapping or text source; the error lists the fields and both values | use a new `output_dir` |
+| Same error but both checkpoint IDs are equal (Studio, `artifacts/neural-scores/threshold`) | code before `cdf1f0d` recorded "no text source" differently; not a real change | fixed in the scorer: `git pull` and rerun the same command; finished shards resume |
 | `peak_gpu_reserved_gb` far above `peak_gpu_allocated_gb` (Studio: 12.6 vs 2.7 GB) | PyTorch's cache holds on to memory across variable batch shapes; the real need is the allocated figure | harmless for one scorer (OOM splits batches); never share the T4 with a second GPU job, or if unavoidable start the scorer with `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` |
 | `ready_inputs: 0` in `--dry-run` for routes | C's shards lack `.complete.json` | ask C to publish sidecars; never hand-create them for unfinished shards |
 
