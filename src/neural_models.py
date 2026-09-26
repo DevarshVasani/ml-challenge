@@ -329,7 +329,7 @@ def evaluate_scores(scores: pd.DataFrame, ground_truth: Mapping[str, Iterable[st
     counts = np.array([len(available.get(sid, set())) for sid in ids], dtype=float)
     metrics["candidate_counts"] = {"mean": float(counts.mean()) if len(counts) else 0.0, "p95": float(np.percentile(counts, 95)) if len(counts) else 0.0, "max": int(counts.max()) if len(counts) else 0}
     if query_metadata is not None:
-        for field, output_key in (("country", "by_country"), ("match_count", "by_match_count")):
+        for field, output_key in (("country", "by_country"), ("match_count", "by_match_count"), ("singleton", "by_singleton")):
             groups: dict[str, list[str]] = {}
             for sid in ids:
                 groups.setdefault(str(query_metadata.get(sid, {}).get(field, "UNKNOWN")), []).append(sid)

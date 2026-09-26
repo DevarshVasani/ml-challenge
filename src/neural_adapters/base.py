@@ -1,10 +1,12 @@
-"""The stable adapter boundary shared by both model owners."""
+"""The stable adapter boundary shared by both neural model owners."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Sequence
+
+from ..neural_contracts import TEXT_FIELDS
 
 
 @dataclass
@@ -15,6 +17,16 @@ class AdapterConfig:
     max_length: int = 256
     missing_text: str = ""
     device: str = "cpu"
+
+
+PAIR_TEXT_FIELDS = tuple(TEXT_FIELDS)
+PAIR_SERIALIZATION_SEPARATOR = " || "
+
+
+def serialize_pair_fields(row: Mapping[str, Any], missing_text: str = "") -> str:
+    """Serialize exactly the shared six model-text fields in contract order."""
+    values = [str(row.get(field, missing_text) or missing_text) for field in PAIR_TEXT_FIELDS]
+    return PAIR_SERIALIZATION_SEPARATOR.join(values)
 
 
 class BasePairAdapter(ABC):
@@ -83,4 +95,3 @@ def get_adapter_class(adapter_type: str):
         from .byt5 import ByT5EncoderPairAdapter
         return ByT5EncoderPairAdapter
     raise ValueError(f"unknown adapter_type {adapter_type!r}; choose fake, mdeberta, or byt5")
-

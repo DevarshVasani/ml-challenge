@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .neural_adapters import AdapterConfig, get_adapter_class
-from .neural_contracts import atomic_write_text, file_identity, manifest_shard_paths
+from .neural_contracts import atomic_write_text, file_identity, seed_everything
 from .neural_models import NeuralTrainingConfig, load_training_state, train_neural
 
 
@@ -28,7 +28,8 @@ def _pair_inputs(config: dict[str, Any], training: dict[str, Any]) -> tuple[list
     manifest_path = training.get("pair_manifest") or config.get("pair_manifest")
     if manifest_path:
         manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        paths = manifest_shard_paths(manifest_path, manifest.get("shard_order", []), str(training.get("pair_subdir", config.get("pair_subdir", "train_pairs"))))
+        base = Path(manifest_path).parent / str(training.get("pair_subdir", config.get("pair_subdir", "train_pairs")))
+        paths = [str(base / name) for name in manifest.get("shard_order", [])]
         identities = {"pair_manifest": file_identity(manifest_path, hash_content=True)}
     else:
         raw = training.get("pairs") or config.get("pairs")
@@ -59,6 +60,7 @@ def execute(config: dict[str, Any]) -> dict[str, Any]:
     adapter_cls = get_adapter_class(adapter_type)
     adapter_cfg = AdapterConfig(adapter_type=adapter_type, checkpoint=str(training.get("checkpoint", config.get("checkpoint", ""))), revision=training.get("revision", config.get("revision")), max_length=int(training.get("max_length", config.get("max_length", 256))), device=str(training.get("device", "cpu")))
     run_cfg = NeuralTrainingConfig(**{key: value for key, value in training.items() if key in NeuralTrainingConfig.__dataclass_fields__})
+    seed_everything(run_cfg.seed)
     resume_dir = training.get("resume") or config.get("resume")
     resume_state = None
     if resume_dir:
