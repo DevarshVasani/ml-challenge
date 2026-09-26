@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .neural_adapters import AdapterConfig, get_adapter_class
-from .neural_contracts import atomic_write_text, file_identity
+from .neural_contracts import atomic_write_text, file_identity, manifest_shard_paths
 from .neural_models import NeuralTrainingConfig, load_training_state, train_neural
 
 
@@ -28,8 +28,7 @@ def _pair_inputs(config: dict[str, Any], training: dict[str, Any]) -> tuple[list
     manifest_path = training.get("pair_manifest") or config.get("pair_manifest")
     if manifest_path:
         manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        base = Path(manifest_path).parent / str(training.get("pair_subdir", config.get("pair_subdir", "train_pairs")))
-        paths = [str(base / name) for name in manifest.get("shard_order", [])]
+        paths = manifest_shard_paths(manifest_path, manifest.get("shard_order", []), str(training.get("pair_subdir", config.get("pair_subdir", "train_pairs"))))
         identities = {"pair_manifest": file_identity(manifest_path, hash_content=True)}
     else:
         raw = training.get("pairs") or config.get("pairs")

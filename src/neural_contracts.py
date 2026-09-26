@@ -106,6 +106,17 @@ def atomic_write_json(path: str | os.PathLike[str], value: Any) -> None:
     atomic_write_text(path, json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
 
+def manifest_shard_paths(manifest_path: str | os.PathLike[str], shard_order: Iterable[str], pair_subdir: str) -> list[str]:
+    """Resolve pair-manifest shard entries to file paths.
+
+    prepare_neural_data records shards relative to the manifest directory
+    (``train_pairs/pairs-….parquet``); older manifests hold bare names that
+    live under ``pair_subdir``. Prefer the first, fall back to the second.
+    """
+    root = Path(manifest_path).parent
+    return [str(root / name if (root / name).is_file() else root / pair_subdir / name) for name in map(str, shard_order)]
+
+
 def validate_pair_frame(frame: Any, *, labeled: bool = False, allow_extra: bool = True) -> None:
     missing = [column for column in PAIR_COLUMNS if column not in frame.columns]
     if missing:

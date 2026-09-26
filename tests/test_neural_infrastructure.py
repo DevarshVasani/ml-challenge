@@ -298,3 +298,13 @@ def test_prediction_shard_resume_and_input_invalidation(tmp_path):
     changed.to_parquet(pair_path, index=False)
     with pytest.raises(ValueError, match="identity changed"):
         execute_prediction(config)
+
+
+def test_manifest_shard_paths_accept_relative_and_bare_entries(tmp_path):
+    from src.neural_contracts import manifest_shard_paths
+    (tmp_path / "train_pairs").mkdir()
+    (tmp_path / "train_pairs" / "pairs-a.parquet").write_bytes(b"")
+    manifest = tmp_path / "train_pairs_manifest.json"
+    expected = [str(tmp_path / "train_pairs" / "pairs-a.parquet")]
+    assert manifest_shard_paths(manifest, ["train_pairs/pairs-a.parquet"], "train_pairs") == expected
+    assert manifest_shard_paths(manifest, ["pairs-a.parquet"], "train_pairs") == expected
