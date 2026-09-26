@@ -21,15 +21,35 @@ from .split import load_ground_truth
 
 
 PAIR_ID_COLUMNS = {"source1_entity_id", "candidate_entity_id"}
-NON_FEATURE_COLUMNS = PAIR_ID_COLUMNS | {"label", "fold", "source1_fold", "candidate_fold"}
+NON_FEATURE_COLUMNS = PAIR_ID_COLUMNS | {
+    "label", "fold", "source1_fold", "candidate_fold",
+    "positive_injected_for_training",  # truth-derived: only training pairs know this
+    "candidate_source", "retrieval_provenance",  # categorical strings, not raw numeric features
+    "name_a", "address_a", "country_a", "name_b", "address_b", "country_b",  # raw text, not features
+}
+
+FEATURE_ALLOWLIST_PREFIXES = (
+    "name_", "address_", "retrieval_", "retrieved_by_", "frequent_key_",
+    "candidate_count", "near_tie_", "best_", "second_", "is_strongest_",
+    "strongest_", "competing_", "house_", "unit_", "legal_form_", "jaro_",
+    "jaccard_", "length_", "exact_", "postcode_", "rare_token_", "address_a_missing", "address_b_missing", "address_carries_despite_name_conflict",
+    "strong_name_", "weak_name_", "is_injected_positive", "is_top_competing_",
+)
 AUTO_POSITIVE_WEIGHT_MIN = 1.0
 AUTO_POSITIVE_WEIGHT_MAX = 20.0
 
 
 def identify_feature_columns(frame: pd.DataFrame) -> list[str]:
+    """Explicit allowlist-based selection — never auto-discover numeric columns blindly.
+
+    Per architecture doc: numeric-column autodiscovery is unsafe for these shards
+    because truth-derived columns (e.g. positive_injected_for_training) are numeric
+    and would otherwise leak into the feature set silently.
+    """
     columns = [
         column for column in frame.columns
         if column not in NON_FEATURE_COLUMNS
+        and column.startswith(FEATURE_ALLOWLIST_PREFIXES)
         and (pd.api.types.is_numeric_dtype(frame[column]) or pd.api.types.is_bool_dtype(frame[column]))
     ]
     if not columns:
