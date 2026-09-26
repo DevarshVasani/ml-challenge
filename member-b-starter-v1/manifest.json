@@ -1,0 +1,84 @@
+{
+  "completion": "complete",
+  "outputs": {
+    "evaluation_truth.tsv": {
+      "rows": 5000,
+      "sha256": "b4b938a5adf9a2adfc1c499f4b79c7d0a4fa54da39f444c48597208f2b46c14d"
+    },
+    "final_queries.tsv": {
+      "rows": 2500,
+      "sha256": "9ddfcf354202b2e9b12d9ca7738c892962f4c7b602db0758adf3920c0aabc2d7"
+    },
+    "threshold_candidate_pairs.parquet": {
+      "rows": 25428,
+      "sha256": "96194541b447d8e3b19defbf32c3130b6c14bd5b2261a406478cde05220aa62d"
+    },
+    "threshold_queries.tsv": {
+      "rows": 2500,
+      "sha256": "25fd8edb42fd9d1a54c5fd13d48732cf6de976a30af0937e3726c4530d371506"
+    },
+    "threshold_records.parquet": {
+      "rows": 25290,
+      "sha256": "c09b502928b32cc2f296583adb4d6e1ceb574a0bb77fd15a0bf6946b8337c4e7"
+    },
+    "threshold_sample": {
+      "complete_by_s1": true,
+      "complete_by_source_record": false,
+      "query_count": 64,
+      "source_shards": [
+        {
+          "path": "/teamspace/studios/this_studio/neural-data/threshold_pairs/pairs-000000049920-000000050048.parquet",
+          "sha256": "d222a74236c1b1f6997282cb91acc951be5a4c697b36f5dd0b872f95c3a7128a"
+        },
+        {
+          "path": "/teamspace/studios/this_studio/neural-data/threshold_pairs/pairs-000000050048-000000050176.parquet",
+          "sha256": "29ea727fcb8302f0aeddb21a2aad987b7a10026065b88022be65f209097aa4df"
+        }
+      ]
+    },
+    "threshold_sample_queries.tsv": {
+      "rows": 64,
+      "sha256": "7ea20f5bfb520bf833267ae456f4ce7d0c678acbf4a476cb523e2c1744076d4a"
+    },
+    "train_candidate_pairs.parquet": {
+      "rows": 1691,
+      "sha256": "5cc79f6c8ec997ab53c6ed2550c15a4b155235eb59dc9a31f1726c6a13fceb72"
+    },
+    "train_labels.parquet": {
+      "rows": 1691,
+      "sha256": "79043aebfe3cc1f1bafcd3e728e12dde86ee327cdcaad91d3e25f445391ac37a"
+    },
+    "train_queries.tsv": {
+      "rows": 50000,
+      "sha256": "b7ebd31ad5d5bdf51d4a5d4acc4f8343cf41037758997bc87a4e4a464751eba9"
+    },
+    "train_records.parquet": {
+      "rows": 1819,
+      "sha256": "14e166598801153dea14fc8eb8977986423794a05c653f970a21eeeb196072de"
+    },
+    "train_sample": {
+      "complete_by_s1": true,
+      "complete_by_source_record": false,
+      "query_count": 128,
+      "source_shards": [
+        {
+          "path": "/teamspace/studios/this_studio/neural-data/train_pairs/pairs-000000000000-000000000128.parquet",
+          "sha256": "c281f8ca0f6d398c78ce5c7b5fb8f33096325555adb6d22c9c5ca26fbede55ed"
+        }
+      ]
+    },
+    "train_sample_queries.tsv": {
+      "rows": 128,
+      "sha256": "06356e09168227830de54b323e3330613906edc628daa4ca39e860004fdeae19"
+    }
+  },
+  "pair_key": [
+    "candidate_source",
+    "candidate_entity_id",
+    "source1_entity_id"
+  ],
+  "query_manifest": "/teamspace/studios/this_studio/neural-data/query_manifest.json",
+  "query_manifest_sha256": "789fc4ff5016f72e90270cd126a2dc4c2b34cf454834120cc53ecd5aba62efe5",
+  "schema_version": "member-b-starter-1",
+  "warning": "Bootstrap pairs are S1-grouped and do not provide complete source-record competition groups. Evaluation truth and training labels are separate from candidate features."
+}
