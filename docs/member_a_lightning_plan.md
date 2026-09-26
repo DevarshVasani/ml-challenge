@@ -14,7 +14,7 @@ whom. Run everything long inside `tmux` so a closed tab does not kill it.
 | 3. Threshold logits | **do now** | does not depend on C (see step 3) |
 | 3b. B starter rehearsal | **do after 3** | laptop check passed; confirm on the Studio |
 | 3c. Test source store | **start now** (CPU) | needed before any test route shard can be scored |
-| 3d. C's threshold gate v1 | **do after 3** | C's schema received; laptop check passed (963,843 routed pairs, exact text) |
+| 3d. C's threshold gate v1 | benchmark passed on the Studio; **`--execute` after 3** | 10,000/10,000 scored, 972 pairs/s, GPU-bound, CPU prep 1.6 s per 10k (hidden) |
 | 4–5. C's test route shards | **blocked on C** | still need C's routed pair count on B's new candidates; do not `--execute` production before the budget check in step 2 |
 
 While waiting for C: B's machine has no GPU and a 13.6 GiB memory limit,
@@ -261,6 +261,14 @@ on the laptop the records join cost 0.22 s per 10k pairs):
 python -m src.score_neural --config configs/neural/score_mdeberta_gate_threshold.json --benchmark 10000 --project-pairs 963843
 ```
 
+Studio result of that benchmark: `model_pairs: 10000`, `status_counts:
+{scored: 10000}`, 972 pairs/s forward (1,028 earlier; normal run-to-run
+spread), `bottleneck: gpu_forward`. CPU per 10k pairs: join 0.26 s, hash
+0.19 s, tokenize 1.12 s (about 3× slower than the laptop CPU), write 0.03 s,
+vs 10.3 s GPU, so the prefetch hides it. Token lengths p50 47, max 132, no
+truncation, padding efficiency 97%. Scoring all 963,843 routed pairs
+uncached would take about 17 min.
+
 Expect `rows: 963843`, `cached: 963843`, `model_pairs: 0`, `missing_record: 0`
 (all reused from step 3). If step 3 has not finished, this scores the routed
 pairs on the GPU instead (~16 min); still correct, just not free. Send D
@@ -374,6 +382,7 @@ by hour 10**; after that no new checkpoint enters production.
 | Benchmark "none of the sampled pairs reached the model" | every sampled row was `missing_record` or cached | same as above; the benchmark has no reuse cache, so it is always the text source |
 | Error "input shard changed since it was scored" | the file was replaced after scoring | confirm with C, then `--rescore-changed` |
 | Error "different checkpoint/input format/route" | output dir belongs to another checkpoint or route setting | use a new `output_dir` |
+| `peak_gpu_reserved_gb` far above `peak_gpu_allocated_gb` (Studio: 12.6 vs 2.7 GB) | PyTorch's cache holds on to memory across variable batch shapes; the real need is the allocated figure | harmless for one scorer (OOM splits batches); never share the T4 with a second GPU job, or if unavoidable start the scorer with `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` |
 | `ready_inputs: 0` in `--dry-run` for routes | C's shards lack `.complete.json` | ask C to publish sidecars; never hand-create them for unfinished shards |
 
 A shard is refused, with nothing written, when more than
@@ -410,7 +419,7 @@ Current message (fill in the hour and the threshold ETA):
 ```
 A status @ hour <h>
 checkpoint: ckpt-e315e181e5896f9c (inputs_verified=true, 0 held-out queries seen in training)
-throughput: 1,028 pairs/s on T4 fp16, max_tokens=16384, peak 3.9 GB, 0 OOM (8192/16384/32768 all 0)
+throughput: 972-1,028 pairs/s on T4 fp16, max_tokens=16384, 0 OOM; GPU memory actually used 2.7 GB (cache may reserve up to ~12.6 GB)
 threshold logits: running now -> artifacts/neural-scores/threshold, ETA ~20 min
 budget: test S2+S3 = 9.97M records. Top-3/record <= 29.9M pairs = ~8.1h (at the 8h limit);
         top-2 <= 19.9M = ~5.4h. Need C's routed count; tree-only rejects on rank 3 would give margin.
