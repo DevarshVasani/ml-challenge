@@ -109,8 +109,11 @@ audit_output/match_cardinality.tsv
 venv/
 
 artifacts/
+artifacts.tar
+*.sqlite
+*.sqlite.manifest.json
 audit_report/
 docs/
 audit_output/
 
-neural-data/neural-data-smoke/
+neural-data/
