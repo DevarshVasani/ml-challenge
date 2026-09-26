@@ -201,3 +201,23 @@ def test_records_files_give_same_text_as_source_store(tmp_path):
     assert a["cache_key"].tolist() == b["cache_key"].tolist()  # identical key + model text (None name -> "")
     with pytest.raises(ValueError, match="not both"):
         execute(_config(tmp_path, [str(tmp_path / "keys.parquet")], records=str(tmp_path / "records.parquet"), source_store=str(tmp_path / "store.sqlite"), output_dir=str(tmp_path / "c")), **QUIET)
+
+
+def test_records_rebuilt_from_pair_shards_reproduce_pair_text(tmp_path):
+    from src.records_from_pairs import records_from_pairs
+
+    pairs = pd.DataFrame([_pair("S1-001", "S2-001"), _pair("S1-001", "S3-007", source="S3", name_b="Café Ltd"), _pair("S1-002", "S2-001")])
+    pairs.to_parquet(tmp_path / "pairs.parquet", index=False)
+    records = records_from_pairs([str(tmp_path / "pairs.parquet")])
+    records.to_parquet(tmp_path / "records.parquet", index=False)
+    assert len(records) == 4 and set(records["source"]) == {"S1", "S2", "S3"}
+    gate = pairs[KEY].assign(route=["neural", "neural", "discard"])
+    gate.to_parquet(tmp_path / "gate.parquet", index=False)
+    execute(_config(tmp_path, [str(tmp_path / "pairs.parquet")], output_dir=str(tmp_path / "full")), **QUIET)
+    result = execute(_config(tmp_path, [str(tmp_path / "gate.parquet")], records=str(tmp_path / "records.parquet"),
+                             require_route=True, reuse_from=[str(tmp_path / "full")], output_dir=str(tmp_path / "gate")), **QUIET)
+    assert result["rows"] == 2 and result["cached"] == 2 and result["model_pairs"] == 0
+    conflicting = pairs.copy(); conflicting.loc[2, "name_b"] = "Other"
+    conflicting.to_parquet(tmp_path / "bad.parquet", index=False)
+    with pytest.raises(ValueError, match="conflicting text"):
+        records_from_pairs([str(tmp_path / "bad.parquet")])

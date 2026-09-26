@@ -1,0 +1,14 @@
+{
+  "adapter_type": "mdeberta",
+  "checkpoint": "artifacts/neural-mdeberta",
+  "pairs": ["artifacts/c-threshold-gate-v1/threshold_gate_v1.parquet"],
+  "route_column": "route",
+  "route_value": "neural",
+  "require_route": true,
+  "records": ["artifacts/neural-data/threshold_records_from_pairs.parquet"],
+  "reuse_from": ["artifacts/neural-scores/threshold"],
+  "device": "cuda",
+  "max_tokens": 16384,
+  "max_batch_rows": 512,
+  "output_dir": "artifacts/neural-scores/gate-threshold-v1"
+}

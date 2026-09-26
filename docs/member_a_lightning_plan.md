@@ -14,7 +14,8 @@ whom. Run everything long inside `tmux` so a closed tab does not kill it.
 | 3. Threshold logits | **do now** | does not depend on C (see step 3) |
 | 3b. B starter rehearsal | **do after 3** | laptop check passed; confirm on the Studio |
 | 3c. Test source store | **start now** (CPU) | needed before any test route shard can be scored |
-| 4–5. C's route shards | **blocked on C** | need C's route schema and routed pair count; do not `--execute` production before the budget check in step 2 |
+| 3d. C's threshold gate v1 | **do after 3** | C's schema received; laptop check passed (963,843 routed pairs, exact text) |
+| 4–5. C's test route shards | **blocked on C** | still need C's routed pair count on B's new candidates; do not `--execute` production before the budget check in step 2 |
 
 While waiting for C: B's machine has no GPU and a 13.6 GiB memory limit,
 so B's new reverse retrieval, and therefore C's routed pair count, may arrive
@@ -218,12 +219,71 @@ If B instead publishes test `*_records.parquet` files, replace `source_store`
 with `"records": [...]` (the records path holds everything in RAM; fine for
 samples, check free memory before loading all 11.7M test records).
 
+## 3d. C's threshold gate v1: first C → A → D pass (≈1 min if step 3 is done)
+
+C sent `threshold_gate_v1.parquet` (62 MB, sha256 `f99ad4e3…`): one row per
+historical threshold pair (993,174; keys identical to the threshold pair
+shards, no duplicates), key-only (no text), 67 columns, with `route` ∈
+{`neural`: 963,843, `discard`: 29,331}. There is no `tree_only` route yet.
+
+What the gate does: plain **top-3 S1 candidates per S2/S3 record**
+(`gate_rank ≤ 3` → `neural`, ranks 4+ → `discard`). On this sample it keeps
+97% because the sample is S1-grouped: each S2/S3 record has only about 1.2
+competing S1s here. So this file says **nothing about production volume**;
+in production top-3 is still the ~29.9M-pair, ~8.1 h case from step 2.
+
+Text for these key-only train-split pairs comes from the historical threshold
+shards themselves, so it is exactly the model's training-format text (checked
+on the laptop: 963,843 routed pairs, 0 missing, 0 text mismatches):
+
+```bash
+mkdir -p artifacts/c-threshold-gate-v1   # put C's threshold_gate_v1.parquet here
+sha256sum artifacts/c-threshold-gate-v1/threshold_gate_v1.parquet   # f99ad4e3530c78df…
+python -m src.records_from_pairs --pair-manifest artifacts/neural-data/threshold_pairs_manifest.json \
+  --pair-subdir threshold_pairs --output artifacts/neural-data/threshold_records_from_pairs.parquet
+python -m src.score_neural --config configs/neural/score_mdeberta_gate_threshold.json --execute | tee artifacts/score-gate-threshold.log
+```
+
+Expect `rows: 963843`, `cached: 963843`, `model_pairs: 0`, `missing_record: 0`
+(all reused from step 3). If step 3 has not finished, this scores the routed
+pairs on the GPU instead (~16 min); still correct, just not free. Send D
+`artifacts/neural-scores/gate-threshold-v1/`. It holds `route=neural` rows
+only; D takes `discard` rows (and later `tree_only`) from C's file.
+
+### Send back to C and D (A does not act on these)
+
+- **To C and D, label leak risk:** the file carries `is_injected_positive`
+  (all 0 here). On training data it marks injected positives, so it is truth
+  derived and must be outside the tree's feature allowlist.
+- **To C and D:** the `competing_s1_*` features in this sample come from
+  incomplete groups (B's starter warning: S1-grouped, not complete per S2/S3
+  record). Do not trust them until B's repartitioned shards exist.
+- **To C:** production route shards need a `<shard>.complete.json` sidecar
+  when closed; A's route config only scores shards that have one.
+- **To C:** a gate run on B's new reverse-retrieval candidates is what gives
+  the routed pair count A needs for the go/no-go.
+- **To D, budget lever (label-free, from this file):** most neural-routed
+  pairs have a near-zero tree score. If D validates a tree-only reject below a
+  threshold, top-3 production would shrink roughly as below. Whether it is
+  safe needs D's recall check with labels. These fractions come from the old
+  ~398-candidates-per-query retrieval; production top-3 candidates are
+  stronger, so real savings will be smaller:
+
+| tree-only reject if `tree_score <` | neural keeps | top-3 production | hours at 1,028/s |
+|---|---|---|---|
+| 0.0001 | 69.9% | ~20.9M | ~5.6 |
+| 0.001 | 33.0% | ~9.9M | ~2.7 |
+| 0.01 | 13.0% | ~3.9M | ~1.1 |
+| 0.05 | 6.5% | ~1.9M | ~0.5 |
+
 ## 4. First real handoff: new candidate sample from C — by hour 6
 
 When C publishes the first route shards for the new candidate sample:
 
-1. Agree C's column names; set `key_columns`, the `pairs` glob and a versioned
-   `output_dir` (e.g. `artifacts/neural-scores/routes-v1`) in
+1. C's column names are known from gate v1 (`source1_entity_id`,
+   `candidate_entity_id`, `candidate_source`, `route`), which are already the
+   config defaults. Set the `pairs` glob and a versioned `output_dir` (e.g.
+   `artifacts/neural-scores/routes-v1`) in
    `configs/neural/score_mdeberta_routes.json`.
 2. Point the text source at the right split: `artifacts/source-store-test.sqlite`
    (step 3c) for test routes; for a validation (train-split) sample use B's
@@ -307,6 +367,7 @@ checkpoint: <checkpoint_id> (inputs_verified=<true/false>)
 throughput: <pairs/s> on T4 <precision>, max_tokens=<n>, peak <GB> GB
 threshold logits: <done/in progress> -> artifacts/neural-scores/threshold (<rows> rows, 0 unscored)
 b-starter rehearsal: <cached>/25428 cached, <missing> missing (expect 25428 / 0)
+C gate v1 (threshold): <cached>/963843 routed pairs scored -> artifacts/neural-scores/gate-threshold-v1
 test source store: <building / done, N records>
 routes: <version> <done>/<total> shards, <rows> rows, missing_record=<n>, nonfinite=<n>, ETA <time>
 blockers: <none | what I need from B/C/D>
@@ -323,5 +384,11 @@ budget: test S2+S3 = 9.97M records. Top-3/record <= 29.9M pairs = ~8.1h (at the 
         top-2 <= 19.9M = ~5.4h. Need C's routed count; tree-only rejects on rank 3 would give margin.
         (the 34.7M / 9.4h figure is the old S1x20 assumption, not this plan)
 tokenizer: "incorrect regex pattern" warning is known; left unchanged on purpose (matches training)
-blockers: C's route shard schema + routed count; test source store building (step 3c)
+C gate v1: plain top-3 per S2/S3 record; 963,843 of 993,174 threshold pairs routed, keys match;
+        97% kept only because this sample has ~1.2 S1s per record, so it does not size production.
+        Scores for its neural rows -> artifacts/neural-scores/gate-threshold-v1 (<done/ETA>)
+flags: is_injected_positive is in C's feature file (truth-derived, keep out of features);
+       competing_s1_* on this sample come from incomplete groups
+lever for D: tree_score < 0.001 as tree-only reject would keep ~33% of neural work (needs D's recall check)
+blockers: C's routed count on B's new candidates; test source store building (step 3c)
 ```
