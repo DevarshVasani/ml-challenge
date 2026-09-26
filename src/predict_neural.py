@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 
 from .neural_adapters import get_adapter_class
-from .neural_contracts import ArtifactManifest, atomic_write_json, atomic_write_text, config_hash, directory_identity, file_identity, git_commit, sha256_file, validate_pair_frame, validate_prediction_frame
+from .neural_contracts import ArtifactManifest, atomic_write_json, atomic_write_text, config_hash, directory_identity, file_identity, git_commit, manifest_shard_paths, sha256_file, validate_pair_frame, validate_prediction_frame
 from .neural_models import predict_pairs
 
 
@@ -30,8 +30,7 @@ def _inputs(config: dict[str, Any], *, hash_content: bool) -> tuple[list[str], d
     identities: dict[str, Any] = {}
     if manifest_path:
         manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        base = Path(manifest_path).parent / str(config.get("pair_subdir", "final_pairs"))
-        paths = [str(base / value) for value in manifest.get("shard_order", [])]
+        paths = manifest_shard_paths(manifest_path, manifest.get("shard_order", []), str(config.get("pair_subdir", "final_pairs")))
         query_ids = list(map(str, manifest.get("query_ids", [])))
         identities["pair_manifest"] = file_identity(manifest_path, hash_content=hash_content)
     else:

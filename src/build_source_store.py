@@ -27,12 +27,21 @@ def main() -> None:
         raise ValueError("sources must map source labels (S1/S2/S3) to TSV paths")
     output = Path(config["output"])
     identities = {key: file_identity(value, hash_content=True) for key, value in paths.items()}
-    SourceStore.build(paths, output, batch_size=int(config.get("batch_size", 10_000)))
+    manifest_path = Path(f"{output}.manifest.json")
+    if output.exists():
+        if not manifest_path.exists():
+            raise ValueError(f"source store exists without a completion manifest: {output}")
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if previous.get("input_identities") != identities or previous.get("configuration_hash") != config_hash(config) or previous.get("completion") != "complete":
+            raise ValueError(f"existing source store is incompatible: {output}")
+        print(json.dumps({"output": str(output), "manifest": str(manifest_path), "reused": True}, indent=2))
+        return
+    SourceStore.build(paths, output, batch_size=int(config.get("batch_size", 10_000)), input_identities=identities, resume=bool(config.get("resume", True)))
     manifest = ArtifactManifest(kind="source-store", config=config, input_identities=identities, completion="complete", git_commit=git_commit())
     manifest.row_counts = {"sqlite_bytes": output.stat().st_size}
     manifest.generated_file_checksums[output.name] = sha256_file(output)
-    atomic_write_json(f"{output}.manifest.json", manifest.to_dict())
-    print(json.dumps({"output": str(output), "manifest": f"{output}.manifest.json"}, indent=2))
+    atomic_write_json(manifest_path, manifest.to_dict())
+    print(json.dumps({"output": str(output), "manifest": str(manifest_path), "reused": False}, indent=2))
 
 
 if __name__ == "__main__":

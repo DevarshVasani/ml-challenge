@@ -16,6 +16,7 @@ def fold_for_entity(entity_id: str, explicit_folds: Mapping[str, int], seed: int
         if fold < 0 or fold >= n_splits:
             raise ValueError(f"Explicit fold for {key} is outside [0, {n_splits})")
         return fold
-    digest = hashlib.sha256(f"{seed}:{key}".encode("utf-8")).digest()
-    return int.from_bytes(digest, "big") % n_splits
+    # Canonical unmatched policy shared with neural_data.stable_unmatched_fold.
+    digest = hashlib.sha256(f"{seed}:{key}".encode("utf-8")).hexdigest()
+    return int(digest[:16], 16) % n_splits
 

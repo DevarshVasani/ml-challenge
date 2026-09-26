@@ -102,6 +102,8 @@ def select_query_ids(
     fold: int | Sequence[int],
     requested: int,
     seed: int = 42,
+    prepared_ground_truth: Mapping[str, set[str]] | None = None,
+    prepared_components: Mapping[str, set[str]] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Select whole connected components with deterministic country/status strata.
 
@@ -117,17 +119,18 @@ def select_query_ids(
     if missing_s1:
         raise ValueError(f"S1 IDs missing from verified fold map: {sorted(missing_s1)[:5]}")
     candidates = [sid for sid in ids if int(fold_map[sid]) in requested_folds]
-    gt = {str(k): set(map(str, v)) for k, v in ground_truth.items()}
+    gt = prepared_ground_truth if prepared_ground_truth is not None else {str(k): set(map(str, v)) for k, v in ground_truth.items()}
     for sid in candidates:
         for candidate_id in gt.get(sid, set()):
             if candidate_id not in fold_map:
                 raise ValueError(f"known-positive endpoint missing from verified fold map: {candidate_id}")
             if int(fold_map[candidate_id]) != int(fold_map[sid]):
                 raise ValueError(f"cross-fold known positive: {sid} -> {candidate_id}")
-    components = _component_ids(candidates, gt, fold_map)
+    components = prepared_components if prepared_components is not None else _component_ids(candidates, gt, fold_map)
     component_rows: list[dict[str, Any]] = []
+    candidate_set = set(candidates)
     for root, members in components.items():
-        sids = sorted(set(members) & set(candidates))
+        sids = sorted(set(members) & candidate_set)
         if not sids:
             continue
         countries = [str(meta.loc[sid].get("country", "")) if sid in meta.index else "" for sid in sids]
@@ -194,14 +197,18 @@ def select_training_pairs(
     fold_seed: int = 42,
     n_folds: int = 3,
     candidate_source_resolver=None,
+    prepared_ground_truth: Mapping[str, set[str]] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
     """Keep every positive and choose stable, positive-safe negatives per query."""
     s1_ids = list(map(str, s1_ids))
     required = {"source1_entity_id", "candidate_entity_id", "candidate_source"}
     if not required.issubset(candidates.columns):
         raise ValueError(f"candidates require {sorted(required)}")
-    gt = {str(k): set(map(str, v)) for k, v in ground_truth.items()}
-    positive_endpoints = {candidate for values in gt.values() for candidate in values}
+    # Callers processing many queries can provide this once; the compatibility
+    # path keeps the small-call API unchanged.
+    gt = prepared_ground_truth if prepared_ground_truth is not None else {
+        str(k): set(map(str, v)) for k, v in ground_truth.items()
+    }
     selected: list[pd.DataFrame] = []
     injected = 0
     excluded_heldout_negatives = 0
@@ -213,7 +220,7 @@ def select_training_pairs(
                 raise ValueError(f"training S1 endpoint missing verified fold mapping: {sid}")
             if held_out_folds and int(fold_map[sid]) in held_out_folds:
                 raise ValueError(f"held-out S1 endpoint selected for training: {sid}")
-            missing_positives = true - set(fold_map)
+            missing_positives = {value for value in true if value not in fold_map}
             if missing_positives:
                 raise ValueError(f"known-positive endpoint missing from verified fold map: {sorted(missing_positives)[:5]}")
             if held_out_folds and any(int(fold_map[value]) in held_out_folds for value in true):

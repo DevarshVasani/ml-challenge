@@ -1,32 +1,280 @@
-# Amazon ML Challenge — Business Entity Resolution
+# Amazon ML Challenge - Business Entity Resolution
 
-Robust, production-grade infrastructure for Business Entity Resolution across multi-source commercial datasets.
+This repository resolves Source 1 businesses against matching records in Sources 2 and 3. It contains:
 
----
+- a classical TF-IDF and pair-model pipeline;
+- a scalable, resumable data-preparation path shared by the neural model owners;
+- leakage-safe connected-component folds;
+- candidate, pair, prediction, and export contracts with coverage checks;
+- offline synthetic tests that do not require model downloads or competition-scale preprocessing.
 
-## 🛠️ Setup & Environment
+The scalable preparation path is the recommended route for the shared neural dataset. It uses global TF-IDF statistics, memory-mapped source shards, SQLite exact-match and source stores, one loaded retrieval channel at a time, and durable batch manifests.
 
-Use Python 3.10+ and install the project dependencies:
+## Setup
+
+Use Python 3.10 or newer.
 
 ```bash
-# Option 1: Standard pip / venv
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate       # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+```
 
-# Option 2: Conda / Mamba
+Alternatively:
+
+```bash
 conda env create -f environment.yml
 conda activate er-challenge
 ```
 
-The expected data layout is `student_resource/dataset/train/` containing
-`train_source1.tsv`, `train_source2.tsv`, `train_source3.tsv`, and
-`train_ground_truth.tsv`, plus the corresponding test source files under
-`student_resource/dataset/test/`.
+GPU-only dependencies are listed separately in `requirements-gpu.txt`. A GPU is not used for index building, candidate retrieval, source-store construction, or pair preparation.
 
----
+Expected training files:
 
-## 🚀 Full Pipeline Run
+```text
+student_resource/dataset/train/
+  train_source1.tsv
+  train_source2.tsv
+  train_source3.tsv
+  train_ground_truth.tsv
+```
+
+Test sources belong under `student_resource/dataset/test/`.
+
+## Recommended scalable preparation workflow
+
+The index-build, source-store, candidate-query, and neural-preparation commands below require `--execute`. Running those commands without `--execute`, or with `--dry-run`, only validates configuration and reports cheap file metadata.
+
+### 1. Inspect the machine and existing artifacts
+
+These commands do not scan the datasets, load index pickles, initialize CUDA, download models, or launch jobs:
+
+```bash
+python -m src.environment_status \
+  --artifact-dir artifacts \
+  --config configs/neural/data_pilot.json
+
+python -m src.preprocess_status \
+  --config configs/neural/index_pilot.json
+
+python -m src.build_candidate_index \
+  --config configs/neural/index_pilot.json \
+  --dry-run
+
+python -m src.build_source_store \
+  --config configs/neural/source_store_pilot.json \
+  --dry-run
+```
+
+Use `preprocess_status --verify` only when a full source and artifact checksum pass is intended:
+
+```bash
+python -m src.preprocess_status \
+  --config configs/neural/index_pilot.json \
+  --verify
+```
+
+### 2. Create and verify leakage-safe folds
+
+```bash
+python -m src.split \
+  --data-dir student_resource/dataset/train \
+  --out-folds artifacts/folds.tsv \
+  --out-summary reports/split_summary.json \
+  --verify
+```
+
+Known-positive connected components are kept in one fold. Missing folds for known-positive endpoints are errors. Hash fallback is used only for unmatched retrieved endpoints, using the same versioned algorithm throughout the repository.
+
+### 3. Build or resume source indexes and the raw-text store
+
+```bash
+python -m src.build_candidate_index \
+  --config configs/neural/index_pilot.json \
+  --execute
+
+python -m src.build_source_store \
+  --config configs/neural/source_store_pilot.json \
+  --execute
+```
+
+The default index backend:
+
+- streams source TSV columns instead of loading the full source table;
+- spills exact corpus term and document frequencies to SQLite;
+- fits one global vocabulary and IDF per source/field channel;
+- stores query-ready sparse matrices as uncompressed, memory-mapped arrays;
+- stores full nonempty exact-match postings in SQLite, including duplicate normalized strings;
+- checkpoints source batches and resumes only when the source/configuration identity matches.
+
+`top_k=100` applies independently to each TF-IDF source/field channel. It is not a total per-query candidate cap. Exact matches are not truncated.
+
+### 4. Freeze the query selection
+
+This is an expensive dataset-processing command, not a metadata-only status command:
+
+```bash
+python -m src.prepare_neural_data \
+  --config configs/neural/data_pilot.json \
+  --execute \
+  --queries-only
+```
+
+It writes `artifacts/neural-data/query_manifest.json`, freezing the train, threshold-tuning, and final-comparison query IDs. A compatible existing manifest is consumed unchanged rather than resampling queries.
+
+The pilot requests 50,000 training queries and 5,000 held-out queries, split component-safely into approximately 2,500 threshold and 2,500 final queries. Connected components can make actual counts differ slightly from the requested targets.
+
+### 5. Query every retrieval channel
+
+```bash
+python -m src.query_candidate_index \
+  --config configs/neural/candidate_query_pilot.json \
+  --dry-run
+
+python -m src.query_candidate_index \
+  --config configs/neural/candidate_query_pilot.json \
+  --execute
+```
+
+Retrieval is channel-major and defaults to one resident index worker. Every stable query batch records completion for every exact and TF-IDF channel, including channels that returned zero rows. After all channels for a batch are durable and checksummed, they are unioned into an immutable candidate batch.
+
+Re-running with `"resume": true` skips only compatible, checksum-valid work. A corrupt or truncated channel file is regenerated without discarding unrelated batches.
+
+### 6. Create the shared raw-text pair shards
+
+```bash
+python -m src.prepare_neural_data \
+  --config configs/neural/data_pilot.json \
+  --execute
+```
+
+Pair preparation:
+
+- requires exact coverage of the frozen query manifest;
+- never interprets an unprocessed validation query as having zero candidates;
+- injects missed positives only for training and reports them separately from retrieval recall;
+- excludes held-out endpoints from training negatives;
+- joins only the current candidate batch through the SQLite source store;
+- writes atomic, checksummed, resumable train/threshold/final pair batches;
+- publishes an immutable bootstrap manifest for the leading completed training batches;
+- preserves the pair-column and manifest interface used by both neural models.
+
+The primary outputs are:
+
+```text
+artifacts/neural-data/
+  query_manifest.json
+  pair_progress.json
+  bootstrap_pairs_manifest.json
+  train_pairs_manifest.json
+  threshold_pairs_manifest.json
+  final_pairs_manifest.json
+  train_pairs/
+  threshold_pairs/
+  final_pairs/
+```
+
+## Artifact and resume model
+
+Important preparation artifacts are organized as follows:
+
+```text
+artifacts/
+  candidate-index/
+    manifest.json
+    build_progress.json
+    S2_business_name/
+      disk_metadata.json
+      build_state.json
+      vectorizer.pkl
+      vocabulary_counts.sqlite
+      matrix-*-{data,indices,indptr}.npy
+      ids-*.json
+      exact_sqlite.db
+      exact_sqlite.json
+    ...
+  source-store.sqlite
+  source-store.sqlite.manifest.json
+  neural-candidates/
+    channel_manifest.json
+    manifest.json
+    channels/
+    final/
+  neural-data/
+    ...
+```
+
+Recovery rules:
+
+| Observed state | Behavior |
+| --- | --- |
+| Completed component with compatible identities and valid checksums | Reuse it. |
+| Compatible `build_state.json` | Resume the disk-backed index from committed rows/shards. |
+| Compatible `source-store.sqlite.inprogress` | Resume source insertion from the committed row checkpoint. |
+| Completed zero-result retrieval batch | Preserve it as valid coverage. |
+| Missing or corrupt channel batch | Regenerate only that batch/channel. |
+| Changed source, index semantics, frozen queries, or candidate policy | Refuse reuse and require a new versioned output. |
+| Valid components but missing root index manifest | Verify first, then run `preprocess_status --recover-manifest`. |
+| Legacy pickle without strong exact-index provenance | Report it as unverified; validate on sufficient system RAM or rebuild into a new versioned location. |
+| Missing candidate coverage for any frozen query | Refuse pair preparation. |
+| Published bootstrap shard | Never overwrite it; later manifests may reference the same checksum. |
+
+Do not delete a nonempty artifact root merely to bypass compatibility checks. Status inspection preserves existing files by default and never unpickles a legacy index.
+
+## Resource guidance
+
+Conservative defaults are:
+
+```json
+{
+  "index_workers": 1,
+  "sparse_threads": 2,
+  "query_batch_size": 128,
+  "source_read_chunk_rows": 25000,
+  "pair_join_target_rows": 25000,
+  "shard_target_rows": 75000,
+  "bootstrap_train_queries": 1000,
+  "resume": true,
+  "strict_country": false
+}
+```
+
+For approximately 16 GB of system RAM, retain these defaults and keep roughly 25-35% of usable host or cgroup memory free for Python, the operating system, and transient sparse operations. For 32-64 GB, increase source or query chunks only after measuring peak RSS and disk throughput; keep one index channel resident unless a measured experiment justifies otherwise.
+
+Disk requirements depend on vocabulary density, source sizes, exact-posting multiplicity, and candidate counts. Reserving 150-250 GB free is only a planning allowance, not a guarantee. Use `environment_status`, component sizes, and a small real benchmark to decide whether the machine is sufficient. More GPU VRAM does not help these stages.
+
+Recommended benchmark ladder for the user-run environment:
+
+1. Inspect status and actual host/cgroup RAM and free disk.
+2. Validate or recover the existing S2 business-name component.
+3. Run 500-1,000 frozen bootstrap queries against the full source background.
+4. Record wall time, peak RSS, index/shard bytes, candidate counts, recall, and pairs/second.
+5. Increase to 5,000 queries and project the remaining pilot from measured throughput.
+6. Run the full frozen pilot only if measured memory and time are acceptable.
+
+Real-data performance and hardware sufficiency have not been measured in this repository.
+
+## Neural training and evaluation
+
+After shared pair manifests exist, follow [the neural GPU runbook](docs/neural_gpu_runbook.md) and [the adapter contract](docs/neural_adapter_contract.md).
+
+Example training commands:
+
+```bash
+python -m src.train_neural --config configs/neural/mdeberta_pilot.json --dry-run
+python -m src.train_neural --config configs/neural/mdeberta_pilot.json --execute
+
+python -m src.train_neural --config configs/neural/byt5_pilot.json --dry-run
+python -m src.train_neural --config configs/neural/byt5_pilot.json --execute
+```
+
+Tune a decision threshold only on the threshold subset. Freeze it before evaluating the final-comparison subset.
+
+The mDeBERTa and ByT5 production adapters remain model-owner work. The shared contracts, fake-adapter smoke workflow, training loop, resumable prediction, evaluation, and streaming export infrastructure are present.
+
+## Classical pipeline
+
+The original in-memory/classical workflow remains available for smaller runs and experiments:
 
 ```bash
 python -m src.pipeline \
@@ -39,125 +287,62 @@ python -m src.pipeline \
   --seed 42
 ```
 
-Intermediate folds, candidates, features, model artifacts, OOF predictions,
-and test scores are cached in `artifacts/`. Add `--force` to recompute them.
+Its stages are also callable separately through `src.candidates`, `src.features`, `src.train_pair_model`, `src.predict_pair_model`, and `src.export`. Do not confuse this path with the disk-backed shared neural preparation workflow above.
 
----
+Official export files are:
 
-## 🧩 Pipeline Stages & Modules
-
-### 1. Validation Splitting (`src/split.py`)
-Creates fixed 3-fold cross-validation splits balancing match counts and countries (`US`, `India`).
-- **Group Preservation**: Disjoint Set Union (DSU) groups each $S_1$ entity and all its transitively matched records ($S_2/S_3$) into connected components. If multiple $S_1$ entities share a match, they stay in the same fold.
-- **Strict Leakage Prevention**: Held-out validation records are strictly isolated and prevented from entering training candidate pairs or negative sampling sets.
-
-```bash
-python -m src.split \
-  --data-dir student_resource/dataset/train \
-  --out-folds artifacts/folds.tsv \
-  --out-summary reports/split_summary.json \
-  --verify
+```text
+output/matching_results.tsv
+output/candidate_pairs.tsv
 ```
 
-### 2. Candidate Generation / Blocking (`src/candidates.py`)
-```bash
-python -m src.candidates \
-  --s1 student_resource/dataset/train/train_source1.tsv \
-  --s2 student_resource/dataset/train/train_source2.tsv \
-  --s3 student_resource/dataset/train/train_source3.tsv \
-  --gt student_resource/dataset/train/train_ground_truth.tsv \
-  --output artifacts/train_candidates.tsv \
-  --report artifacts/train_candidates.json
+## Evaluation metric
+
+The challenge metric is macro-averaged F0.5 over all Source 1 entities.
+
+For a non-singleton query:
+
+```text
+F0.5 = 5 * TP / (5 * TP + 4 * FP + FN)
 ```
 
-### 3. Feature Engineering (`src/features.py`)
+For a singleton with no true matches, an empty prediction scores 1.0 and any predicted match scores 0.0. Zero-candidate queries remain in the macro denominator.
+
+Run the metric self-check with:
+
 ```bash
-python -m src.features \
-  --s1 student_resource/dataset/train/train_source1.tsv \
-  --s2 student_resource/dataset/train/train_source2.tsv \
-  --s3 student_resource/dataset/train/train_source3.tsv \
-  --candidates artifacts/train_candidates.tsv \
-  --ground-truth student_resource/dataset/train/train_ground_truth.tsv \
-  --folds artifacts/folds.tsv \
-  --output artifacts/train_features.parquet
+python -m src.evaluate --check
 ```
 
-### 4. Model Training & Evaluation (`src/train_pair_model.py`, `src/evaluate.py`)
-```bash
-python -m src.train_pair_model \
-  --features artifacts/train_features.parquet \
-  --ground-truth student_resource/dataset/train/train_ground_truth.tsv \
-  --output-dir artifacts/model
-```
+## Testing
 
-### 5. Prediction & Submission Export (`src/predict_pair_model.py`, `src/export.py`)
-```bash
-python -m src.predict_pair_model \
-  --features artifacts/test_features.parquet \
-  --model-dir artifacts/model \
-  --output-dir artifacts/test_scores \
-  --s1-ids student_resource/dataset/test/test_source1.tsv
-```
+The test suite uses small synthetic fixtures and does not run competition-scale preprocessing or download models:
 
-Official output files written to `output/`:
-- `output/matching_results.tsv` (`source1_entity_id\tmatched_entity_ids`)
-- `output/candidate_pairs.tsv` (`source1_entity_id\tcandidate_entity_ids`)
-
----
-
-## 📊 Evaluation Metric (`src/evaluate.py`)
-
-Submissions are evaluated on a **macro-averaged $F_{0.5}$ score** across all Source 1 ($S_1$) entities.
-
-### Metric Formula:
-For non-singletons (entities with $\ge 1$ true matches):
-$$F_{0.5} = \frac{5 \cdot \text{TP}}{5 \cdot \text{TP} + 4 \cdot \text{FP} + \text{FN}}$$
-Where:
-- $\text{TP}$: Correct predicted matches ($|\text{True} \cap \text{Pred}|$)
-- $\text{FP}$: Incorrect predicted matches ($|\text{Pred} \setminus \text{True}|$)
-- $\text{FN}$: Missed true matches ($|\text{True} \setminus \text{Pred}|$)
-
-For singletons (entities with no true matches):
-- Score $= 1.0$ if the prediction is empty ($\emptyset$).
-- Score $= 0.0$ if any match is predicted (false merge).
-
-### Tiny Example Verifications:
-| Case | Ground Truth | Prediction | TP | FP | FN | Score |
-|---|---|---|---|---|---|---|
-| **Perfect Match** | `[S2-1, S3-2]` | `[S2-1, S3-2]` | 2 | 0 | 0 | **1.0000** |
-| **Extra Match** | `[S2-1]` | `[S2-1, S2-2]` | 1 | 1 | 0 | **5/9 ≈ 0.5556** |
-| **Missed Match** | `[S2-1, S3-2]` | `[S2-1]` | 1 | 0 | 1 | **5/6 ≈ 0.8333** |
-| **Empty Prediction (Non-Singleton)** | `[S2-1]` | `[]` | 0 | 0 | 1 | **0.0000** |
-| **Singleton (Empty Prediction)** | `[]` | `[]` | - | - | - | **1.0000** |
-| **Singleton (False Merge)** | `[]` | `[S2-1]` | - | - | - | **0.0000** |
-
-Run metric self-check:
-```bash
-python3 src/evaluate.py --check
-```
-
-## Neural baseline infrastructure
-
-Shared, label-safe pair contracts, reusable candidate indexes, grouped Parquet
-shards, SQLite source joins, fake-adapter smoke training, resumable scoring,
-threshold evaluation, and streaming export are provided for the future GPU
-baselines. Start with the [GPU runbook](docs/neural_gpu_runbook.md) and the
-[adapter contract](docs/neural_adapter_contract.md). All new expensive
-commands require `--execute`; `--dry-run` and `--help` do not load models or
-iterate the competition dataset.
-
----
-
-## 🧪 Testing
-
-Run test suite:
 ```bash
 python -m pytest -q
-# or
-python3 -m unittest discover tests
 ```
-# Experiment log
 
-`reports/experiments.csv` is a scaffold for measured runs. Values unavailable
-because a run has not been performed must be recorded as `N/A`; they must not
-be replaced with fabricated zeros.
+The current implementation is covered for global-IDF sharding equivalence, duplicate exact postings, deterministic folds and pair sampling, one-channel residency, zero-result coverage, corruption retry, frozen-query pair preparation, immutable bootstrap manifests, streaming metrics, and resume/input invalidation.
+
+## Current project status
+
+Implemented:
+
+- disk-backed global-IDF candidate indexes and SQLite exact postings;
+- source-store and index build checkpoints;
+- channel-sequential candidate retrieval with checksummed batch resume;
+- frozen component-safe query manifests;
+- coverage-aware train/threshold/final pair preparation;
+- immutable bootstrap pair manifests;
+- incremental retrieval diagnostics and environment/status commands;
+- shared neural contracts, fake-adapter testing, prediction, evaluation, and export infrastructure.
+
+Not yet produced or measured:
+
+- real competition source indexes and source store;
+- real blocking recall, throughput, peak RSS, and disk usage;
+- the first real bootstrap pair shard;
+- the final immutable shared dataset manifest;
+- trained production mDeBERTa and ByT5 checkpoints.
+
+Record unavailable experiment values as `N/A` in `reports/experiments.csv`; do not replace them with fabricated zeros.

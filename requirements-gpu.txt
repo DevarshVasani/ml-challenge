@@ -3,3 +3,6 @@
 torch>=2.2,<3
 transformers>=4.40,<5
 tokenizers>=0.19,<1
+# mDeBERTa-v3 tokenizer: sentencepiece model, converted to a fast tokenizer via protobuf
+sentencepiece>=0.1.99
+protobuf>=3.20

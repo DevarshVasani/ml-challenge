@@ -3,7 +3,6 @@
   "checkpoint": "artifacts/neural-mdeberta",
   "pair_manifest": "artifacts/neural-data/threshold_pairs_manifest.json",
   "pair_subdir": "threshold_pairs",
-  "candidate_manifest": "artifacts/neural-candidates/manifest.json",
   "query_manifest": "artifacts/neural-data/query_manifest.json",
   "query_subset": "threshold",
   "batch_size": 32,
