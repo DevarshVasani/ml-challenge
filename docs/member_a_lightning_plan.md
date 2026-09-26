@@ -11,10 +11,10 @@ whom. Run everything long inside `tmux` so a closed tab does not kill it.
 | 0. Setup | done | torch/transformers match the training provenance |
 | 1. Checkpoint card | done | `ckpt-e315e181e5896f9c`, `inputs_verified=true`, 0 held-out queries seen in training |
 | 2. T4 benchmark | done | 1,028 pairs/s fp16 at `max_tokens=16384`, peak 3.9 GB, 0 OOM (table in step 2) |
-| 3. Threshold logits | **do now** | does not depend on C (see step 3) |
+| 3. Threshold logits | done | 993,174 pairs in `artifacts/neural-scores/threshold`; run the pilot comparison in step 3 if not done |
 | 3b. B starter rehearsal | **do after 3** | laptop check passed; confirm on the Studio |
 | 3c. Test source store | **start now** (CPU) | needed before any test route shard can be scored |
-| 3d. C's threshold gate v1 | benchmark passed on the Studio; **`--execute` after 3** | 10,000/10,000 scored, 972 pairs/s, GPU-bound, CPU prep 1.6 s per 10k (hidden) |
+| 3d. C's threshold gate v1 | done | 963,843 routed pairs, all `cached` from step 3, 0 missing, 0 non-finite, 34 s; `artifacts/neural-scores/gate-threshold-v1` → D |
 | 4–5. C's test route shards | **blocked on C** | still need C's routed pair count on B's new candidates; do not `--execute` production before the budget check in step 2 |
 
 While waiting for C: B's machine has no GPU and a 13.6 GiB memory limit,
