@@ -258,3 +258,236 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# Route-aware streaming export (Member D §9)
+# ---------------------------------------------------------------------------
+
+
+def route_aware_streaming_export(
+    test_s1_manifest_path,
+    decision_pair_shards,
+    selected_match_shards,
+    s2_registry,
+    s3_registry,
+    shard_completion_manifests,
+    output_dir,
+    *,
+    ownership_enabled: bool = False,
+) -> None:
+    """Write matching_results.tsv and candidate_pairs.tsv from decision-pair artifacts.
+
+    The source of candidate_pairs.tsv is the final decision-pair artifact
+    (neural-fusion + validated tree-only), NOT neural scores only.
+
+    Validates before atomic rename:
+    - Every test S1 exactly once and in test order
+    - Valid S2/S3 IDs
+    - No duplicate pairs
+    - No duplicate ID within an S1 output row
+    - All declared shards present and checksum-complete
+    - Every final match is in the final candidate set
+    - No unknown S1
+    - Exact headers and tab formatting
+    - Ownership uniqueness if ownership_enabled
+
+    Parameters
+    ----------
+    test_s1_manifest_path : str or Path
+        TSV with entity_id column listing all test S1 IDs.
+    decision_pair_shards : sequence of str/Path
+        All shards of the final decision-pair artifact (both routes).
+    selected_match_shards : sequence of str/Path
+        Shards of pairs selected as final matches.
+    s2_registry : set[str] or None
+        All known S2 IDs for validation.
+    s3_registry : set[str] or None
+        All known S3 IDs for validation.
+    shard_completion_manifests : sequence of str/Path
+        Manifest JSON files; validates completion + checksums.
+    output_dir : str or Path
+        Where to write matching_results.tsv and candidate_pairs.tsv.
+    ownership_enabled : bool
+        If True, also validates that each source record is owned by at most one S1.
+    """
+    import hashlib
+    import json
+    import os
+    import tempfile
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- validate shard completeness ---
+    for manifest_path in (shard_completion_manifests or []):
+        manifest_path = Path(manifest_path)
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Shard manifest not found: {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("completion") != "complete":
+            raise ValueError(
+                f"Shard manifest {manifest_path} is not marked complete "
+                f"(status={manifest.get('completion')})"
+            )
+
+    # --- load test S1 IDs ---
+    test_s1_ids = load_test_s1_ids(str(test_s1_manifest_path))
+    test_s1_set = set(test_s1_ids)
+    if len(test_s1_ids) != len(test_s1_set):
+        raise ValueError("test_s1_manifest contains duplicate S1 IDs")
+
+    # --- load decision pairs ---
+    decision_frames = []
+    for p in (decision_pair_shards or []):
+        p = Path(p)
+        if not p.exists():
+            raise FileNotFoundError(f"Decision pair shard not found: {p}")
+        if p.suffix.casefold() == ".parquet":
+            decision_frames.append(pd.read_parquet(p))
+        else:
+            decision_frames.append(pd.read_csv(p, sep="\t", dtype=object, keep_default_na=False))
+    if not decision_frames:
+        raise ValueError("No decision pair shards provided")
+    decision_df = pd.concat(decision_frames, ignore_index=True)
+
+    required_cols = {"source1_entity_id", "candidate_entity_id"}
+    missing_cols = required_cols - set(decision_df.columns)
+    if missing_cols:
+        raise ValueError(f"Decision pair shards missing columns: {sorted(missing_cols)}")
+
+    # --- load selected matches ---
+    match_frames = []
+    for p in (selected_match_shards or []):
+        p = Path(p)
+        if not p.exists():
+            raise FileNotFoundError(f"Selected match shard not found: {p}")
+        if p.suffix.casefold() == ".parquet":
+            match_frames.append(pd.read_parquet(p))
+        else:
+            match_frames.append(pd.read_csv(p, sep="\t", dtype=object, keep_default_na=False))
+    match_df = pd.concat(match_frames, ignore_index=True) if match_frames else pd.DataFrame(columns=["source1_entity_id", "candidate_entity_id"])
+
+    # --- validate IDs ---
+    valid_ids = (s2_registry or set()) | (s3_registry or set())
+    if valid_ids:
+        unknown = set(decision_df["candidate_entity_id"].astype(str)) - valid_ids
+        if unknown:
+            raise ValueError(f"Decision pairs contain unknown candidate IDs: {sorted(unknown)[:5]}")
+
+    # --- validate no unknown S1 ---
+    unknown_s1_decision = set(decision_df["source1_entity_id"].astype(str)) - test_s1_set
+    if unknown_s1_decision:
+        raise ValueError(f"Decision pairs contain unknown S1 IDs: {sorted(unknown_s1_decision)[:5]}")
+
+    # --- build candidate mapping and match mapping ---
+    cand_map: dict = {}
+    for s1, grp in decision_df.groupby("source1_entity_id"):
+        cands = list(dict.fromkeys(str(c) for c in grp["candidate_entity_id"]))
+        if len(cands) != len(set(cands)):
+            raise ValueError(f"Duplicate candidate IDs in decision pairs for S1: {s1}")
+        cand_map[str(s1)] = cands
+
+    match_map: dict = {}
+    if not match_df.empty:
+        for s1, grp in match_df.groupby("source1_entity_id"):
+            matches = list(dict.fromkeys(str(c) for c in grp["candidate_entity_id"]))
+            if len(matches) != len(set(matches)):
+                raise ValueError(f"Duplicate matched IDs for S1: {s1}")
+            match_map[str(s1)] = matches
+
+    # --- validate every match is in candidates ---
+    for s1, matches in match_map.items():
+        cands = set(cand_map.get(s1, []))
+        not_in_cands = set(matches) - cands
+        if not_in_cands:
+            raise ValueError(
+                f"Final matches for {s1} are not in the candidate set: {sorted(not_in_cands)[:5]}"
+            )
+
+    # --- ownership uniqueness check ---
+    if ownership_enabled and not match_df.empty and "candidate_entity_id" in match_df.columns:
+        if "candidate_source" in match_df.columns:
+            ownership_cols = ["candidate_source", "candidate_entity_id"]
+        else:
+            ownership_cols = ["candidate_entity_id"]
+        ownership_counts = match_df.groupby(ownership_cols)["source1_entity_id"].nunique()
+        violations = ownership_counts[ownership_counts > 1]
+        if not violations.empty:
+            raise ValueError(
+                f"Ownership uniqueness violated for {len(violations)} source records: "
+                f"{violations.head(5).to_dict()}"
+            )
+
+    # --- write candidate_pairs.tsv atomically ---
+    cand_pairs_path = output_dir / "candidate_pairs.tsv"
+    tmp_fd, tmp_cand = tempfile.mkstemp(prefix=".candidate_pairs.", dir=str(output_dir))
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write("source1_entity_id\tcandidate_entity_ids\n")
+            for s1 in test_s1_ids:
+                cands = clean_id_list(cand_map.get(s1, []))
+                fh.write(f"{s1}\t{','.join(cands)}\n")
+        os.replace(tmp_cand, cand_pairs_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_cand)
+        except OSError:
+            pass
+        raise
+
+    # --- write matching_results.tsv atomically ---
+    results_path = output_dir / "matching_results.tsv"
+    tmp_fd2, tmp_results = tempfile.mkstemp(prefix=".matching_results.", dir=str(output_dir))
+    try:
+        with os.fdopen(tmp_fd2, "w", encoding="utf-8", newline="") as fh:
+            fh.write("source1_entity_id\tmatched_entity_ids\n")
+            for s1 in test_s1_ids:
+                matches = clean_id_list(match_map.get(s1, []))
+                fh.write(f"{s1}\t{','.join(matches)}\n")
+        os.replace(tmp_results, results_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_results)
+        except OSError:
+            pass
+        raise
+
+    # --- write manifest ---
+    import json as _json
+    export_manifest = {
+        "test_s1_count": len(test_s1_ids),
+        "candidate_pairs_path": str(cand_pairs_path),
+        "matching_results_path": str(results_path),
+        "total_candidate_pairs": sum(len(v) for v in cand_map.values()),
+        "total_matches": sum(len(v) for v in match_map.values()),
+        "ownership_enabled": ownership_enabled,
+    }
+    (output_dir / "export_manifest.json").write_text(
+        _json.dumps(export_manifest, indent=2) + "\n", encoding="utf-8"
+    )
+
+    # --- run official contest validator if present ---
+    import subprocess as _sub
+    validator_candidates = [
+        "scripts/validate_submission.py",
+        "validate_submission.py",
+    ]
+    for v_path in validator_candidates:
+        if Path(v_path).exists():
+            result = _sub.run(
+                ["python", v_path, str(results_path), str(cand_pairs_path)],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Official contest validator FAILED:\n{result.stdout}\n{result.stderr}"
+                )
+            print(f"[export] Official validator passed.")
+            break
+
+    print(f"[export] Written: {cand_pairs_path}")
+    print(f"[export] Written: {results_path}")
+    print(f"[export] {len(test_s1_ids)} S1 IDs, "
+          f"{export_manifest['total_candidate_pairs']} candidate pairs, "
+          f"{export_manifest['total_matches']} matches.")

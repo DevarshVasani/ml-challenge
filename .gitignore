@@ -48,6 +48,9 @@ htmlcov/
 *~
 .DS_Store
 
+# OS-generated metadata
+*:Zone.Identifier
+
 # Data & Large Artifacts
 dataset/
 data/
@@ -77,42 +80,53 @@ lightning_logs/
 output/
 tmp/
 temp/
-
-.venv/
 student_resource/
-# OS-generated
-.DS_Store
-*:Zone.Identifier
+artifacts/
+artifacts.tar
+neural-d-handoff/
+member-d-handoff/
+member-c-handoff/
+*.sqlite
+*.sqlite.manifest.json
+audit_report/
+audit_output/
+neural-data/
+oracle_recall_report.tsv*
 
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
-dist/
-build/
+# Teammate handoff artifacts stay local / artifact-storage only.
+threshold_tree_provenance*.json
+threshold_*_provenance*.json
 
-# Generated configuration output.  The checked-in neural launch configs are
-# deliberately versioned so compute-machine runs use the reviewed contracts.
+# Repository policy: docs are not tracked on main.
+docs/
+
+# Generated configuration output. Reviewed launch templates are versioned.
 configs/
 !configs/
 configs/*
 !configs/neural/
 !configs/neural/*.json
-audit_output/match_cardinality.tsv
-# IDE
-.vscode/
-.idea/
 
-# Environment
-.env
-venv/
+# Member D: version only safe templates/configs.
+!configs/member_d/
+configs/member_d/*
+!configs/member_d/README.md
+!configs/member_d/split.json
+!configs/member_d/evaluate.json
+!configs/member_d/evaluate_threshold.json
+!configs/member_d/fusion.json
+!configs/member_d/fusion_provisional_minimal.json
+!configs/member_d/gate_audit.json
+!configs/member_d/calibration.json
+!configs/member_d/decoder.json
+!configs/member_d/runtime_budget.json
+!configs/member_d/tree_only_fallback.json
 
-artifacts/
-artifacts.tar
-*.sqlite
-*.sqlite.manifest.json
-audit_report/
-docs/
-neural-data/
-oracle_recall_report.tsv*
+# Generated Member D outputs remain local / artifact-storage only.
+reports/member_d/current/
+reports/member_d/*/evaluation.json
+reports/member_d/*/evaluation_summary.tsv
+reports/member_d/*/comparison.json
+reports/member_d/*/comparison.tsv
+reports/member_d/*/ownership_audit.json
+reports/member_d/*/runtime_budget.json

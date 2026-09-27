@@ -1,0 +1,21 @@
+{
+  "version": "fusion_provisional_minimal_v1",
+  "diagnostic_only": true,
+  "reason": "Threshold competition features are not source-record complete; use only tree/neural scores and source indicators.",
+  "C": 1.0,
+  "max_iter": 1000,
+  "class_weight": "balanced",
+  "neural_features": [
+    "tree_score",
+    "tree_logit",
+    "neural_logit_feature",
+    "source_s2_indicator",
+    "source_s3_indicator"
+  ],
+  "tree_features": [
+    "tree_score",
+    "tree_logit",
+    "source_s2_indicator",
+    "source_s3_indicator"
+  ]
+}

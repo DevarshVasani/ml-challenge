@@ -1,0 +1,16 @@
+{
+  "query_manifest": "member-b-starter-v1/threshold_queries.tsv",
+  "ground_truth_tsv": "member-b-starter-v1/evaluation_truth.tsv",
+  "s1_metadata_tsv": null,
+  "raw_candidate_shards": null,
+  "post_gate_candidate_shards": null,
+  "scored_pair_shards": null,
+  "final_prediction_tsv": null,
+  "source_registry_paths": {
+    "s2": null,
+    "s3": null
+  },
+  "output_json": "reports/member_d/eval_result.json",
+  "experiments_csv_row": false,
+  "run_label": "unlabeled"
+}

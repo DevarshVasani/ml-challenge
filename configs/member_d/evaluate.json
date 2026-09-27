@@ -1,0 +1,12 @@
+{
+  "run_label": "member_d_validation",
+  "query_manifest": "member-b-starter-v1/threshold_queries.tsv",
+  "ground_truth_tsv": "member-b-starter-v1/evaluation_truth.tsv",
+  "member_d_split_tsv": "configs/member_d/split.tsv",
+  "raw_candidate_shards": null,
+  "post_gate_candidate_shards": null,
+  "scored_pair_shards": null,
+  "final_prediction_tsv": null,
+  "output_json": "reports/member_d/current/evaluation.json",
+  "output_summary_tsv": "reports/member_d/current/evaluation_summary.tsv"
+}

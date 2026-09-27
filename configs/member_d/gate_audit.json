@@ -1,0 +1,15 @@
+{
+  "cutoffs": [
+    0.0001,
+    0.001,
+    0.01,
+    0.05
+  ],
+  "pairs_per_second": 1028.0,
+  "production_top3_pairs": 29900000,
+  "notes": [
+    "Throughput is Member A's measured T4 best observed rate, not a guarantee.",
+    "Production pair counts are projections only.",
+    "Do not tune on final_gate_v2.parquet."
+  ]
+}

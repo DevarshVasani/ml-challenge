@@ -1,0 +1,7 @@
+{
+  "version": "fallback_tree_only_v1",
+  "calibration_config": "configs/member_d/calibration.json",
+  "decoder_config": "configs/member_d/decoder.json",
+  "enable_ownership_only_if_gold_audit_passes": true,
+  "expected_f05_enabled": false
+}

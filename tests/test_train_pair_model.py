@@ -37,12 +37,12 @@ class TestTrainPairModel(unittest.TestCase):
                 "candidate_entity_id": ["S2-a", "S2-b", "S2-c", "S2-d", "S2-e", "S2-f"],
                 "fold": [0, 0, 1, 1, 2, 2],
                 "label": [1, 0, 1, 0, 1, 0],
-                "useful_feature": [0, 1, 2, 3, 4, 5],
+                "name_test_feature": [0, 1, 2, 3, 4, 5],
             }
         )
-        self.assertEqual(identify_feature_columns(frame), ["useful_feature"])
+        self.assertEqual(identify_feature_columns(frame), ["name_test_feature"])
         scores, columns = generate_oof_predictions(frame, classifier_factory=RecordingClassifier)
-        self.assertEqual(columns, ["useful_feature"])
+        self.assertEqual(columns, ["name_test_feature"])
         self.assertEqual(len(scores), len(frame))
         self.assertTrue(scores["score"].between(0, 1).all())
         # Each fit sees four rows: never the two values in its validation fold.
@@ -80,7 +80,7 @@ class TestTrainPairModel(unittest.TestCase):
                 "source1_fold": [0, 0, 1, 1, 2, 2],
                 "candidate_fold": [0, 1, 1, 2, 2, 0],
                 "label": [1, 0, 1, 0, 1, 0],
-                "useful_feature": [0, 1, 2, 3, 4, 5],
+                "name_test_feature": [0, 1, 2, 3, 4, 5],
             }
         )
         generate_oof_predictions(frame, classifier_factory=RecordingClassifier)
