@@ -1,8 +1,0 @@
-{
-  "output_path": "/home/daksh/Amazon_ML_challenge/ml-challenge/.pytest-tmp/test_id_join_order_independent0/out/joined_scores.parquet",
-  "row_count": 2,
-  "route_counts": {
-    "tree_only": 2
-  },
-  "missing_neural_count": 2
-}
