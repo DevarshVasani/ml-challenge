@@ -1,18 +1,46 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
 .venv/
 venv/
+ENV/
+env/
+.mise.toml.local
+
+# Testing & Linting
 .pytest_cache/
+.pytest-tmp/
 .coverage
 htmlcov/
+.tox/
+.nox/
 .mypy_cache/
 .ruff_cache/
+
+# Jupyter Notebooks
 .ipynb_checkpoints
+
+# IDEs & Editors
 .vscode/
 .idea/
 *.swp
@@ -20,7 +48,10 @@ htmlcov/
 *~
 .DS_Store
 
-# Data & large artifacts
+# OS-generated metadata
+*:Zone.Identifier
+
+# Data & Large Artifacts
 dataset/
 data/
 *.zip
@@ -33,6 +64,8 @@ data/
 *.joblib
 *.npy
 *.npz
+
+# Models & Logs
 models/
 checkpoints/
 *.pt
@@ -42,6 +75,8 @@ checkpoints/
 wandb/
 runs/
 lightning_logs/
+
+# Temporary files & outputs
 output/
 tmp/
 temp/
@@ -51,20 +86,34 @@ artifacts.tar
 *.sqlite
 *.sqlite.manifest.json
 audit_report/
-audit_output/match_cardinality.tsv
+audit_output/
 neural-data/
 oracle_recall_report.tsv*
 
-# Generated configs are ignored except reviewed launch templates.
+# Repository policy: docs are not tracked on main.
+docs/
+
+# Generated configuration output. Reviewed launch templates are versioned.
 configs/
 !configs/
 configs/*
 !configs/neural/
 !configs/neural/*.json
-!configs/member_d/
-!configs/member_d/*.json
 
-# Generated Member D reports remain local.
+# Member D: version only safe templates/configs.
+!configs/member_d/
+configs/member_d/*
+!configs/member_d/README.md
+!configs/member_d/split.json
+!configs/member_d/evaluate.json
+!configs/member_d/evaluate_threshold.json
+!configs/member_d/fusion.json
+!configs/member_d/calibration.json
+!configs/member_d/decoder.json
+!configs/member_d/runtime_budget.json
+!configs/member_d/tree_only_fallback.json
+
+# Generated Member D outputs remain local / artifact-storage only.
 reports/member_d/current/
 reports/member_d/*/evaluation.json
 reports/member_d/*/evaluation_summary.tsv
