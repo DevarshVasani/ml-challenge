@@ -68,7 +68,8 @@ class RetrievalDiagnostics:
         self.recall_total[f"match_count:{match_bin}"] += len(true)
         self.by_country[country].append(count)
         self.by_match_bin[match_bin].append(count)
-        self.oracle_scores.append(score_single_s1(true, ids))
+        # An oracle predicts only retrieved positives; negatives are never forced matches.
+        self.oracle_scores.append(score_single_s1(true, true & ids))
 
     def report(self) -> dict[str, Any]:
         ordered = sorted(self.counts)
