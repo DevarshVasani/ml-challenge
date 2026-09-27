@@ -13,9 +13,10 @@ set -euo pipefail
 # contract. It is NOT the final production/test run because C's provenance
 # explicitly identifies this as the historical bootstrap candidate universe.
 
-D_GATE="${D_GATE:-threshold_gate_v2.parquet}"
-D_ROUTE_TABLE="${D_ROUTE_TABLE:-threshold_route_table_v1.parquet}"
-D_TREE_PROVENANCE="${D_TREE_PROVENANCE:-threshold_tree_provenance_v1.json}"
+D_C_ROOT="${D_C_ROOT:-member-c-handoff}"
+D_GATE="${D_GATE:-$D_C_ROOT/threshold_gate_v2.parquet}"
+D_ROUTE_TABLE="${D_ROUTE_TABLE:-$D_C_ROOT/threshold_route_table_v2.parquet}"
+D_TREE_PROVENANCE="${D_TREE_PROVENANCE:-$D_C_ROOT/threshold_tree_provenance_v2.json}"
 
 D_NEURAL_ROOT="${D_NEURAL_ROOT:-neural-d-handoff/artifacts}"
 D_CARD="${D_CARD:-$D_NEURAL_ROOT/neural-card/checkpoint_card.json}"
@@ -79,7 +80,10 @@ from src.member_d_gate_audit import audit_gate, write_report
 
 cfg = json.loads(Path("configs/member_d/gate_audit.json").read_text())
 report = audit_gate(
-    os.environ.get("D_GATE", "threshold_gate_v2.parquet"),
+    os.environ.get(
+        "D_GATE",
+        "member-c-handoff/threshold_gate_v2.parquet",
+    ),
     "member-b-starter-v1/threshold_queries.tsv",
     "member-b-starter-v1/evaluation_truth.tsv",
     cutoffs=cfg["cutoffs"],
@@ -136,9 +140,10 @@ result = join_scores(
     neural_score_manifest_path=f"{neural_dir}/neural_manifest.json",
     route_table_path=f"{prep}/routes.parquet",
     provenance={
-        "version": "source_complete_threshold_join_v1",
+        "version": "source_complete_threshold_join_v2",
         "selection_scope": "historical_threshold",
         "production_ready": False,
+        "c_handoff_version": "threshold_v2",
     },
 )
 print(result)
@@ -146,7 +151,7 @@ PY
 
 echo "== 6. Fit real source-complete fusion/calibration and select decoder =="
 ownership_arg=()
-FULL_OWNERSHIP="${D_FULL_TRAINING_OWNERSHIP_AUDIT:-}"
+FULL_OWNERSHIP="${D_FULL_TRAINING_OWNERSHIP_AUDIT:-artifacts/member_d/current/b-handoff/full_training_ownership_audit.json}"
 if [[ -n "$FULL_OWNERSHIP" && -f "$FULL_OWNERSHIP" ]]; then
   ownership_arg+=(--ownership-audit "$FULL_OWNERSHIP")
 fi
@@ -166,9 +171,9 @@ echo
 echo "Source-complete threshold selection completed."
 echo
 echo "Important:"
-echo "  - This run IS eligible for threshold-model selection."
-echo "  - It is NOT the final production/test run."
-echo "  - Ownership is production-eligible only with a full-training ownership audit."
+echo "  - C threshold-v2 is eligible for frozen threshold-model selection."
+echo "  - This is NOT the final production/test run."
+echo "  - B's validated full-training ownership audit is used automatically when present."
 echo
 echo "Review:"
 echo "  $PREP/handoff_report.json"

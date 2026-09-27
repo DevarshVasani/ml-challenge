@@ -85,6 +85,7 @@ artifacts/
 artifacts.tar
 neural-d-handoff/
 member-d-handoff/
+member-c-handoff/
 *.sqlite
 *.sqlite.manifest.json
 audit_report/
