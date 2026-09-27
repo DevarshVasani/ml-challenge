@@ -83,6 +83,8 @@ temp/
 student_resource/
 artifacts/
 artifacts.tar
+neural-d-handoff/
+member-d-handoff/
 *.sqlite
 *.sqlite.manifest.json
 audit_report/
@@ -108,6 +110,8 @@ configs/member_d/*
 !configs/member_d/evaluate.json
 !configs/member_d/evaluate_threshold.json
 !configs/member_d/fusion.json
+!configs/member_d/fusion_provisional_minimal.json
+!configs/member_d/gate_audit.json
 !configs/member_d/calibration.json
 !configs/member_d/decoder.json
 !configs/member_d/runtime_budget.json
