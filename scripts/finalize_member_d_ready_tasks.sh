@@ -4,8 +4,9 @@ set -euo pipefail
 # Complete the READY-TO-GO Member-D baseline checks.
 # Run from repository root on Daksh.
 #
-# Handoff-specific A/C validation is in:
+# Handoff-specific validation:
 #   scripts/run_member_d_threshold_rehearsal.sh
+#   scripts/run_member_d_source_complete_threshold.sh
 #
 # Outputs are intentionally written under ignored/local paths.
 
@@ -108,6 +109,7 @@ python -m pytest -q \
   tests/test_member_d_split.py \
   tests/test_member_d_integration.py \
   tests/test_member_d_handoff_tools.py \
+  tests/test_member_d_c_handoff.py \
   tests/test_fusion_calibration.py \
   tests/test_evaluation_slices.py \
   tests/test_final_assembly.py
@@ -130,8 +132,8 @@ fi
 
 echo
 echo "Baseline Member-D validation completed successfully."
-echo "For the current A/C handoff, next run:"
-echo "  bash scripts/run_member_d_threshold_rehearsal.sh"
+echo "For C's current source-complete threshold handoff, run:"
+echo "  bash scripts/run_member_d_source_complete_threshold.sh"
 echo
 echo "Review branch state:"
 git status --short

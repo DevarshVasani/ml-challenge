@@ -92,6 +92,10 @@ audit_output/
 neural-data/
 oracle_recall_report.tsv*
 
+# Teammate handoff artifacts stay local / artifact-storage only.
+threshold_tree_provenance*.json
+threshold_*_provenance*.json
+
 # Repository policy: docs are not tracked on main.
 docs/
 
