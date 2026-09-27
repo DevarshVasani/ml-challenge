@@ -114,6 +114,5 @@ artifacts.tar
 *.sqlite.manifest.json
 audit_report/
 docs/
-audit_output/
-
 neural-data/
+oracle_recall_report.tsv*
