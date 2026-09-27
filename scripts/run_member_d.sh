@@ -1,43 +1,59 @@
 #!/usr/bin/env bash
-# run_member_d.sh - Orchestrates Member D pipeline execution (Steps 15-19)
-set -e
+set -euo pipefail
 
-# Usage: bash scripts/run_member_d.sh
+# Member D Plan 1-3 runner. No large artifacts are stored in Git.
+# Required environment variables for the full pipeline:
+#   D_CANDIDATE_SHARDS       colon-separated source-complete candidate parquet paths
+#   D_CANDIDATE_MANIFESTS    colon-separated source-complete manifest paths
+#   D_TREE_SCORE_SHARDS      colon-separated tree score parquet paths
+#   D_TREE_SCORE_MANIFEST    tree prediction/provenance manifest
+#   D_LABELS                 keyed labels table for threshold split
+# Optional:
+#   D_NEURAL_SCORE_SHARDS    colon-separated neural score paths
+#   D_NEURAL_SCORE_MANIFEST  neural manifest
+#   D_ROUTE_TABLE            keyed route table
 
-echo "=== Member D Pipeline ==="
-echo ""
-
-# 15. Freeze partitions (already run, but ensuring it runs)
-echo "[1/6] Running split to freeze partitions..."
 python -m src.member_d_split --config configs/member_d/split.json
+python -m src.runtime_budget --config configs/member_d/runtime_budget.json --output reports/member_d/current/runtime_budget.json --refuse-on-violation
 
-# 16. Evaluate tree-only fallback on keyed artifacts (Step 17)
-# Note: This requires the tree scoring pipeline (Member A) to have produced
-# 'artifacts/tree_scores_fallback/' first.
-echo "[2/6] Evaluating fallback tree-only (Placeholder)..."
-# python -m src.evaluate_pipeline --config configs/member_d/evaluate_threshold.json
+: "${D_CANDIDATE_SHARDS:?Set D_CANDIDATE_SHARDS}"
+: "${D_CANDIDATE_MANIFESTS:?Set D_CANDIDATE_MANIFESTS}"
+: "${D_TREE_SCORE_SHARDS:?Set D_TREE_SCORE_SHARDS}"
+: "${D_TREE_SCORE_MANIFEST:?Set D_TREE_SCORE_MANIFEST}"
+: "${D_LABELS:?Set D_LABELS}"
 
-# 18. Run Score Join -> Fusion -> Calibration -> Decoder Selection
-echo "[3/6] Joining Scores..."
-# python -m src.score_join \
-#     --candidates artifacts/candidates/ \
-#     --tree-scores artifacts/tree_scores/ \
-#     --neural-scores artifacts/neural_scores/ \
-#     --output-dir artifacts/member_d/joined_scores/
+IFS=':' read -r -a CANDIDATES <<< "$D_CANDIDATE_SHARDS"
+IFS=':' read -r -a CAND_MANIFESTS <<< "$D_CANDIDATE_MANIFESTS"
+IFS=':' read -r -a TREE_SCORES <<< "$D_TREE_SCORE_SHARDS"
+NEURAL_ARG="[]"
+if [[ -n "${D_NEURAL_SCORE_SHARDS:-}" ]]; then
+  IFS=':' read -r -a NEURAL_SCORES <<< "$D_NEURAL_SCORE_SHARDS"
+  NEURAL_ARG=$(python -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${NEURAL_SCORES[@]}")
+fi
 
-echo "[4/6] Running Fusion..."
-# python -m src.fusion --config configs/member_d/fusion.json \
-#     --input artifacts/member_d/joined_scores/ \
-#     --output-dir artifacts/member_d/fusion/
+python - "${CANDIDATES[@]}" -- "${CAND_MANIFESTS[@]}" <<'PY'
+# Intentionally only verifies source-complete grouping here; feature output path is fixed.
+import sys
+from src.source_competition import build_source_competition_artifact
+args=sys.argv[1:]; cut=args.index('--'); shards=args[:cut]; manifests=args[cut+1:]
+build_source_competition_artifact(shards, manifests, 'artifacts/member_d/current/source_competition/candidates.parquet', version='source_competition_v1')
+PY
 
-echo "[5/6] Running Calibration..."
-# python -m src.calibration --config configs/member_d/calibration.json \
-#     --input artifacts/member_d/fusion/ \
-#     --output-dir artifacts/member_d/calibrated_scores/
+python - <<'PY'
+import json, os
+from src.score_join import join_scores
+split=lambda v: [x for x in os.environ[v].split(':') if x]
+join_scores(
+    ['artifacts/member_d/current/source_competition/candidates.parquet'],
+    split('D_TREE_SCORE_SHARDS'),
+    output_dir='artifacts/member_d/current/joined_scores',
+    candidate_manifest_path='artifacts/member_d/current/source_competition/source_competition_manifest.json',
+    tree_score_manifest_path=os.environ['D_TREE_SCORE_MANIFEST'],
+    neural_score_shards=split('D_NEURAL_SCORE_SHARDS') if os.environ.get('D_NEURAL_SCORE_SHARDS') else None,
+    neural_score_manifest_path=os.environ.get('D_NEURAL_SCORE_MANIFEST'),
+    route_table_path=os.environ.get('D_ROUTE_TABLE'),
+    provenance={'version':'joined_v1'},
+)
+PY
 
-echo "[6/6] Selecting Decoder and Freezing Config..."
-# python -c "from src.decoder import select_decoder; select_decoder('artifacts/member_d/calibrated_scores/', 'configs/member_d/decoder.json')"
-
-echo ""
-echo "=== Member D Pipeline Complete ==="
-echo "Note: The execution commands are currently commented out because the required upstream data (Member A's tree scores, Member C's neural scores) are not yet generated in the 'artifacts/' directory. Once those are available, uncomment the execution lines in this script."
+echo "Member D preparation/join complete. Fit fusion/calibration using D_LABELS and configs/member_d/*.json after keyed score coverage is available."

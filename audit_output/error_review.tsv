@@ -1,0 +1,101 @@
+s1_id	other_source	other_id	label	s1_name	other_name	name_similarity	s1_address	other_address	address_similarity	s1_country	other_country	reason_flags
+S1-101322744	S2	S2-720262455	nonmatch	Chiropractic Partners	Chiropractic Partners	1.0	14 Rocky Lane, Houston, TX	CRESTWIND LN, ELGIN, TX	0.125	US	US	similar_name
+S1-101709014	S3	S3-678119393	nonmatch	Cinder	Cinder	1.0	15375 55th Court, Plymouth, MN	24796 9, Winona, MN	0.125	US	US	similar_name
+S1-101056835	S2	S2-869258427	nonmatch	National Fund	national fund	1.0	3236 Normount Avenue, Baltimore, MD	611B RAYMOND AVENUE, ORCUTT, CA	0.111	US	US	similar_name
+S1-101123477	S2	S2-291860287	nonmatch	Orthopedic Care	Orthopedic Care	1.0	8209 Weller Street, Yorktown, IN	1855 ALGONA STREET, DUBUQUE, IA	0.111	US	US	similar_name
+S1-101123477	S3	S3-680732410	nonmatch	Orthopedic Care	Orthopedic Care	1.0	8209 Weller Street, Yorktown, IN	1855 Algona Street, Dubuque, Iowa	0.111	US	US	similar_name
+S1-101645806	S2	S2-25283388	nonmatch	Sterling	STERLING	1.0	4560 Washington Street, Unit 7, Boston, MA	465-469 CLAPBOARDTREE STREET, MA, WESTWOOD	0.091	US	US	similar_name
+S1-100057571	S2	S2-435473605	nonmatch	Scholarship Guild	Scholarship Guild	1.0	1073 Clymers Creek Road, Hurricane, WV	1203- OLD HARRODS CREEK RD, ANCHORAGE, KY	0.083	US	US	similar_name
+S1-10031717	S3	S3-425838121	nonmatch	National Fund	National  Fund	1.0	Santa Maria, 611 Raymond Avenue, CA	3236 Normount Avenue, PMB 6473, Balimore, Maryland	0.083	US	US	similar_name
+S1-100057571	S3	S3-620824264	nonmatch	Scholarship Guild	Scholarship Guild	1.0	1073 Clymers Creek Road, Hurricane, WV	#1203 Old Harrods Creek Rd, PO Box 9467, Anchorage, Kentucky	0.067	US	US	similar_name
+S1-100176728	S2	S2-436436446	nonmatch	Seven Solutions Pvt Ltd	Seven Solutions  Pvt Ltd	1.0	120, 1St Floor, Prasad Chamber Tata Road No 2, Opera House, Girgaon, Mumbai, Mumbai City, Maharashtra	NO 4766/12 DEPUTY GANJ SADAR BAZAR, DELHI, दिल्ली	0.043	India	India	similar_name
+S1-100018231	S2	S2-748515887	nonmatch	Physical Therapy Group	physical therapy group	1.0	13975 Riverport Place Drive, Unit SUITE 105, Maryland Heights, MO	509 DOVER ST, OK, BROKEN ARROW	0.0	US	US	similar_name
+S1-100174601	S3	S3-161920382	nonmatch	Foot & Ankle Center LLC	Foot Center Ankle & LLC	1.0	849 Washington Street, Norwood, MA	501 Fayetteville St, Unit 360, Raleigh, North Carolina	0.0	US	US	similar_name
+S1-100174601	S2	S2-845783437	nonmatch	Foot & Ankle Center LLC	CENTER FOOT & ANKLE LLC	1.0	849 Washington Street, Norwood, MA	501 FAYTETEVILLE ST, RALEIGH, NC	0.0	US	US	similar_name
+S1-100192399	S2	S2-96364540	nonmatch	Patriot Charities	Patriot Charities	1.0	3801 Superior Street, Lincoln, NE	929 BLUEBONNET DR, OLNEY, TX	0.0	US	US	similar_name
+S1-100196139	S3	S3-958314666	nonmatch	Oncology Physicians	Oncology Physicians	1.0	1732 Highland Avenue, Phoenix, AZ	142 Hawthorne Drive, Winchester City, Virginia	0.0	US	US	similar_name
+S1-100542041	S3	S3-251224720	nonmatch	Emerald	Emerald	1.0	128 Madison Park Court, Boston, MA	2770 Panhandle Rd, Marianna, Florida	0.0	US	US	similar_name
+S1-100542041	S2	S2-705562118	nonmatch	Emerald	EMERALD	1.0	128 Madison Park Court, Boston, MA	AZ, 762 COUNTY 13 1/2 ST, YUMA	0.0	US	US	similar_name
+S1-100589899	S2	S2-750481128	nonmatch	Pediatric Care	Pediatric Care	1.0	3 Buckles Avenue, Jamestown, OH	1611 BEAER SAINT, PARKERSBURG, WV	0.0	US	US	similar_name
+S1-100619468	S3	S3-979991785	nonmatch	Saint Cathedral	Saint  Cathedral	1.0	2684 Brittany Lane, Woodbury, MN	211 Albany Turnpike, Canton Valley, Connecticut	0.0	US	US	similar_name
+S1-100619468	S2	S2-124733904	nonmatch	Saint Cathedral	Saint Cathedral	1.0	2684 Brittany Lane, Woodbury, MN	211 Albany Turnpike, CANTON, CT	0.0	US	US	similar_name
+S1-100669420	S3	S3-670007738	nonmatch	Bureau of Health	Bureau  of Health	1.0	805 Lunenburg Avenue, Victoria Town, VA	Tulsa CITY, 6964 74th St, Oklahoma	0.0	US	US	similar_name
+S1-100707047	S2	S2-315510371	nonmatch	Womens Health Physicians	Womens  Health Physicians	1.0	7151 60, Unit 544, Gold Canyon, AZ	ADAMS AVE, TEMPLE, TX	0.0	US	US	similar_name
+S1-100707047	S3	S3-933640849	nonmatch	Womens Health Physicians	Womens Health Physicians	1.0	7151 60, Unit 544, Gold Canyon, AZ	1505 Adams Ave, Temple, Texas	0.0	US	US	similar_name
+S1-100758515	S2	S2-148649228	nonmatch	United Center	UNITED  CENTER	1.0	3252 Hendricks Avenue, Memphis, TN	84 ILLINI POINT, DADEVILLE, AL	0.0	US	US	similar_name
+S1-10080885	S2	S2-220323466	nonmatch	Dermatology Health	DERMATOLOGY HEALTH	1.0	309 Mill Street, North Manchester, IN	121 ANGELINA DRIVE, CRANDALL, TX	0.0	US	US	similar_name
+S1-10080885	S2	S2-669325806	nonmatch	Dermatology Health	DERMATOLOGY HEALTH	1.0	309 Mill Street, North Manchester, IN	121 Angelina Dr, CRANDALL, TX	0.0	US	US	similar_name
+S1-100836636	S3	S3-252872740	nonmatch	Urgent Care Associates LLC	Urgent Associates Care LLC	1.0	9398 Abingdon Court, Prince William County, VA	880 Prune Ln, La Grange, Texas	0.0	US	US	similar_name
+S1-100914897	S3	S3-37235820	nonmatch	Orthopedic Group	Orthopedic Group	1.0	1048 Tyre Road, Tyre, NY	923 Mckee Street, State Colelge, Pennsylvania	0.0	US	US	similar_name
+S1-100946908	S3	S3-639561144	nonmatch	Twisted Bakery	Twisted Bakery	1.0	457 Kings Court, Akron, OH	##2848 Glengarry Drive, Lake Havasu City, Arizona	0.0	US	US	similar_name
+S1-100946908	S2	S2-359182640	nonmatch	Twisted Bakery	Twisted Bakery	1.0	457 Kings Court, Akron, OH	2848. GLENGARRY DRIVE, LAKE HAVASU CITY, AZ	0.0	US	US	similar_name
+S1-100957573	S2	S2-500034562	nonmatch	Womens Health Physicians Inc	Womens Health Physicians  Inc	1.0	5269 4098, TX, Kaufman	12388-D Muir Trail Way, RANCHO CORDOVA, CA	0.0	US	US	similar_name
+S1-100957573	S3	S3-152585818	nonmatch	Womens Health Physicians Inc	Womens Health Inc Physicians	1.0	5269 4098, TX, Kaufman	12388 1/2 Muir Trail Way, Rancho Cordova, California	0.0	US	US	similar_name
+S1-101007928	S3	S3-370020805	nonmatch	Physical Therapy Group	Physical Therapy  Group	1.0	1509 Dover Street, Broken Arrow, OK	13975 Riverport Place Drive, Unit Suite 105, Maryland Heights CDP, Missouri	0.0	US	US	similar_name
+S1-101040477	S3	S3-22284158	nonmatch	Cure Pilates LLC	Cure Pilates Llc	1.0	1217 College Street, Bowling Green, KY	3691. Henley Deemer Road, # B, Mc Dermott, Ohio	0.0	US	US	similar_name
+S1-101040477	S3	S3-30391195	nonmatch	Cure Pilates LLC	Cure Pilates  LLC	1.0	1217 College Street, Bowling Green, KY	Henley Deemer Rd, Mc Dermott, Ohio	0.0	US	US	similar_name
+S1-101056835	S3	S3-301997822	nonmatch	National Fund	national fund	1.0	3236 Normount Avenue, Baltimore, MD	611 Raymond Ave, Orcutt, California	0.0	US	US	similar_name
+S1-101123477	S2	S2-263427876	nonmatch	Orthopedic Care	Orthopedic  Care	1.0	8209 Weller Street, Yorktown, IN	1855 ALGONA SAINT, DUBUQUE, IA	0.0	US	US	similar_name
+S1-101123477	S3	S3-643247906	nonmatch	Orthopedic Care	orthopedic care	1.0	8209 Weller Street, Yorktown, IN	1855 Algona St, Dubuque, Iowa	0.0	US	US	similar_name
+S1-101148252	S3	S3-757531064	nonmatch	Helios Inc	Helios Inc	1.0	10748 Ruger Road, Willis, TX	15189 High Timber Ln, Noblesville, Indiana	0.0	US	US	similar_name
+S1-101176737	S3	S3-92341000	nonmatch	Pediatric Dental Care	Pediatric Dental Care	1.0	Solon, OH, 34251 Summerset Drive	2062 North Road, Morganton, North Carolina	0.0	US	US	similar_name
+S1-101219764	S3	S3-678119393	nonmatch	Cinder	Cinder	1.0	2299 Elm Lane, Prineville, OR	24796 9, Winona, MN	0.0	US	US	similar_name
+S1-101219764	S2	S2-519998579	nonmatch	Cinder	Cinder	1.0	2299 Elm Lane, Prineville, OR	MN, 55RD COURT, PLYMOUTH	0.0	US	US	similar_name
+S1-101331533	S3	S3-158343563	nonmatch	Womens Health Physicians Inc	womens health physicians inc	1.0	12388 Muir Trail Way, Rancho Cordova, CA	Kaufman, 269 4098, Texas	0.0	US	US	similar_name
+S1-101360339	S3	S3-488526451	nonmatch	Surgical Care LLC	Surgical Care  LLC	1.0	Concho, 108 N8570, AZ	3746 Blue Eagle Lane, Phoenix, Arizona	0.0	US	US	similar_name
+S1-101524631	S3	S3-441559208	nonmatch	Helios	Helios	1.0	5413 Autumn Mist Lane, Brownsville, TX	5715 Rockport Landing Pl, Chesterfield County, Virginia	0.0	US	US	similar_name
+S1-101524631	S2	S2-577724547	nonmatch	Helios	Helios	1.0	5413 Autumn Mist Lane, Brownsville, TX	5715-5719 ROCKPORT LANDING PLACE, MIDLOTHIAN, VA	0.0	US	US	similar_name
+S1-101524631	S2	S2-192014108	nonmatch	Helios	Helios	1.0	5413 Autumn Mist Lane, Brownsville, TX	5715-5719 ROCKPORT LANDING PL, MIDLOTHIAN, VA	0.0	US	US	similar_name
+S1-101524631	S2	S2-903237189	nonmatch	Helios	Helios	1.0	5413 Autumn Mist Lane, Brownsville, TX	5715-5719 ROCKPORT LANDING PLACE, MIDLOTHIAN, VA	0.0	US	US	similar_name
+S1-101526419	S3	S3-799903704	nonmatch	Dental Care Associates	Dental Care Associates	1.0	1314 Young Avenue, Temple, TX	1465 Northstar St, San Bernardino, California	0.0	US	US	similar_name
+S1-101586224	S2	S2-552848280	nonmatch	Saint Cathedral	Saint Cathedral	1.0	211 Albany Turnpike, Canton, CT	2684 BRITTANY LANE, WOODBURY, MN	0.0	US	US	similar_name
+S1-101683087	S2	S2-189709768	nonmatch	Autism Assistance Ministries	AUTISM ASSISTANCE MINISTRIES	1.0	1200 W Creek Village Drive, Elkton, MD		0.0	US	US	similar_name
+S1-101689758	S3	S3-197219834	nonmatch	Cancer Guild	Cancer Guild	1.0	1089 50, Orem, UT	Alabama, 9139 Vaughn Rd, Pike Road	0.0	US	US	similar_name
+S1-101703184	S3	S3-450225933	nonmatch	Helios	Helios	1.0	5715 Rockport Landing Place, Chesterfield County, VA	Brownsville, Texas, 5413 Autumn Mist Lane	0.0	US	US	similar_name
+S1-101709014	S2	S2-345479466	nonmatch	Cinder	Cinder	1.0	15375 55th Court, Plymouth, MN	#2299 ELM LN, PRINEVILLE, OR	0.0	US	US	similar_name
+S1-101709014	S3	S3-102908926	nonmatch	Cinder	Cinder	1.0	15375 55th Court, Plymouth, MN	2299- Elm Ln, Prineville, Oregon	0.0	US	US	similar_name
+S1-101886163	S3	S3-568699392	nonmatch	Surgical Care LLC	Surgical Care Llc	1.0	3746 Blue Eagle Lane, Phoenix, AZ	Arizona, Concho, 108A N8570	0.0	US	US	similar_name
+S1-101902208	S2	S2-553814270	nonmatch	Cure Pilates LLC	Cure Pilates LLC	1.0	3691 Henley Deemer Road, Unit B, Mc Dermott, OH	KY, BOWLING GREEN, 1217 COLLEGE SAINT	0.0	US	US	similar_name
+S1-101908866	S3	S3-625300717	nonmatch	Womens Health Physicians	Womens  Health Physicians	1.0	1505 Adams Avenue, Temple, TX	Gold Canyon, # 544, 7151 1/2 60, Arizona	0.0	US	US	similar_name
+S1-101980260	S3	S3-482729322	nonmatch	Physical Therapy Partners LLC	Physical  Therapy LLC Partners	1.0	2534 Fenestra Drive, Dallas, TX	1100 Sizemore Hwy, Geneva, Alabama	0.0	US	US	similar_name
+S1-100176728	S3	S3-605944743	nonmatch	Seven Solutions Pvt Ltd	Seven Pvt Solutions Ltd	1.0	120, 1St Floor, Prasad Chamber Tata Road No 2, Opera House, Girgaon, Mumbai, Mumbai City, Maharashtra	12 Deputy Ganj Sadar Bazar, Delhi, North Delhi, दिल्ली	0.0	India	India	similar_name
+S1-100276566	S3	S3-197654240	nonmatch	Sunrise Consultancy	Sunrise Consultancy	1.0	No 118 1St F Cross, 3Rd Stage 4Th Block Basveshwaranagar, Bangalore North, Bangalore, Karnataka	H.no 6Th Floor, Malad East, Mumbai Ii, महाराष्ट्र	0.0	India	India	similar_name
+S1-100344668	S2	S2-652153780	nonmatch	Star Producer Private Limited	Star Producer Private Limited	1.0	Ganja, Langaleswar Baliapal, Balasore, Orissa	GRI, PLOT NO. A 36, 37, 38, SWAMI SMARTH COMPLEX, DIVA GAON SECTOR-9 AIROLI, THANE, Maharashtra	0.0	India	India	similar_name
+S1-100344668	S3	S3-577228436	nonmatch	Star Producer Private Limited	Star Producer Limited Private	1.0	Ganja, Langaleswar Baliapal, Balasore, Orissa	Gri, Plot No. A 36, 37, 38, Swami Smarth Complex, Diva Gaon Sector-9 Airoli, Thane, महाराष्ट्र	0.0	India	India	similar_name
+S1-101147938	S3	S3-952627606	nonmatch	Maa Investments Private Limited	MAA INVESTMENTS PRIVATE LIMITED	1.0	1170/31, Revenue Colony, Opp. Hotel Span Executive Shivaji Nagar, Pune, Maharashtra	Pimpri Chinchwad, MH, # Mont Vert Seville	0.0	India	India	similar_name
+S1-101236895	S2	S2-253098498	nonmatch	Seven Solutions Pvt Ltd	Seven Solutions Pvt Ltd	1.0	4766/12 Deputy Ganj Sadar Bazar, Delhi, North Delhi, Delhi	BLOCK B-02 120, 1ST FLOOR, PRASAD CHAMBER TATA ROAD NO 2, OPERA HOUSE, GIRGAON, MUMBAI, महाराष्ट्र	0.0	India	India	similar_name
+S1-101236895	S2	S2-725497102	nonmatch	Seven Solutions Pvt Ltd	seven solutions pvt ltd	1.0	4766/12 Deputy Ganj Sadar Bazar, Delhi, North Delhi, Delhi	BLOCK B-02 120, 1ST FLOOR, PRASAD CHAMBER TATA ROAD NO 2, OPERA HOUSE, GIRGAON, MUMBAI, Maharashtra	0.0	India	India	similar_name
+S1-101378639	S2	S2-293814878	nonmatch	Baba Developers Private Limited	LIMITED BABA DEVELOPERS PRIVATE	1.0	Fl. No. 12, Sn-51/3, 56/14/15/16 Munurawar Soc. Wadgaonsheri, Pune, Maharashtra	P. N. W-5-57, NASHIK, महाराष्ट्र	0.0	India	India	similar_name
+S1-10102229	S3	S3-161920382	nonmatch	Foot & Ankle Legacy Center LLC	Foot Center Ankle & LLC	0.833	105 Beebe Street, Unit 2111, Gilbert, AZ	501 Fayetteville St, Unit 360, Raleigh, North Carolina	0.071	US	US	similar_name
+S1-100488695	S3	S3-115083813	nonmatch	Pediatric Dental Physicians LLC	LLC Pediatric Dental Creative Physicians	0.8	5936 Whiteleysburg Road, Harrington, DE	Lyndhurst Station Road, Augusta County, Virginia	0.1	US	US	similar_name
+S1-101227372	S3	S3-669371207	nonmatch	Foot & Ankle Partners	Foot & Ankle Partners [LLC]	0.8	627 Sumner Drive, Mesquite, TX	Missouri, 512 Ozark Jubilee Drive, Nixa	0.1	US	US	similar_name
+S1-100486762	S3	S3-496502327	nonmatch	Pediatric Dental Creative Physicians LLC	Pediatric Dental Physicians Llc	0.8	68 Lyndhurst Station Road, Augusta County, VA	5936 Whiteleysburg Road, Harrington, Delaware	0.091	US	US	similar_name
+S1-10102229	S2	S2-845783437	nonmatch	Foot & Ankle Legacy Center LLC	CENTER FOOT & ANKLE LLC	0.833	105 Beebe Street, Unit 2111, Gilbert, AZ	501 FAYTETEVILLE ST, RALEIGH, NC	0.0	US	US	similar_name
+S1-101149256	S3	S3-937354846	nonmatch	Foot & Ankle Center LLC	The Foot & Ankle Center  LLC	0.833	501 Fayetteville Street, Unit 360, Raleigh, NC	849 Washington St, Norwood, Massachusetts	0.0	US	US	similar_name
+S1-100137931	S3	S3-756434825	nonmatch	Sunrise Services Private Limited	Galaxy Sunrise  Private Limited Services	0.8	21A, Shakespeare Sarani, 6Th Floor Kolkata, Kolkata, Kolkata, Howrah, West Bengal	H.no 5 Ist Floor Ub Cross Bhoopasandra Extension Rmv Ii Stage, Bangalore, KA	0.048	India	India	similar_name
+S1-101018227	S3	S3-521898810	nonmatch	Shivam Technology Private Limited	Shivam High Technology  Private Limited	0.8	H. No 20, Jyoti Nagar, Near Kendriya Vidhyalay 3, Huzur, Bhopal, Madhya Pradesh	No 027/4 Divya Darshan Commercial Complex Dahanukar Colony Kothrud, Pune, MH	0.043	India	India	similar_name
+S1-100368634	S3	S3-805434914	nonmatch	Carpenters Union Local No 54	Carpenters Union  Local No	0.8	3454 Marty Circle, Hope Mills, NC	621 17th St, Hastings, Minnesota	0.0	US	US	similar_name
+S1-100492728	S3	S3-160986251	nonmatch	Foot & Ankle Care Associates	Foot & Ankle Care	0.8	AZ, Mesa Desert, 2053 Leisure World	Appleton, Wisconsin, ##2978 Turquoise Ln	0.0	US	US	similar_name
+S1-100684351	S3	S3-743928992	nonmatch	Ear Nose & Throat Center	Ear Nose & Throat	0.8	2509 Tower Petroleum Drive, Houma, LA	1553. Lady Brunetta Rd, Bradley, Illinois	0.0	US	US	similar_name
+S1-10071853	S2	S2-521492777	nonmatch	Primary Care Center LLC	PRIMARY CARE PIONEER CENTER LLC	0.8	10365 Rashmi Drive, Elk Grove, CA	1658 WATERFORD STREET, MOBILE, AL	0.0	US	US	similar_name
+S1-10071853	S3	S3-837963519	nonmatch	Primary Care Center LLC	Primary Care Píoneer Center LLC	0.8	10365 Rashmi Drive, Elk Grove, CA	Mobile, ##1658 Waterford St, Alabama	0.0	US	US	similar_name
+S1-10071853	S2	S2-815354312	nonmatch	Primary Care Center LLC	Primary Care Pioneer LLC Center	0.8	10365 Rashmi Drive, Elk Grove, CA	1658 WATERFORD ST, MOBILE, AL	0.0	US	US	similar_name
+S1-101149256	S3	S3-177797900	nonmatch	Foot & Ankle Center LLC	Foot & Ankle Center	0.8	501 Fayetteville Street, Unit 360, Raleigh, NC	849 Washington St, Norwood, Massachusetts	0.0	US	US	similar_name
+S1-101227372	S2	S2-257604800	nonmatch	Foot & Ankle Partners	Foot & Ankle Partners [[L.L.C.]]	0.8	627 Sumner Drive, Mesquite, TX	NIXA, MO, 512 Ozark Jubilee Dr	0.0	US	US	similar_name
+S1-101316970	S3	S3-154235518	nonmatch	Rev It Up Bistro	Rev It Up Bistro  LLC	0.8	224 69 Bypass Road, Mcalester, OK	##500 Liberty Lane, Unit 1005, Fayetteville, Tennessee	0.0	US	US	similar_name
+S1-101331533	S3	S3-929135597	nonmatch	Womens Health Physicians Inc	Womens Health Physicians Inc Authority	0.8	12388 Muir Trail Way, Rancho Cordova, CA	269 4098, Kaufman, Texas	0.0	US	US	similar_name
+S1-10137005	S3	S3-577540873	nonmatch	Rev It Up Bistro LLC	Rev Rev It Bistro Up	0.8	500 Liberty Lane, Unit 1005, Fayetteville, TN	Pittsburg County, Oklahoma, 224 69 Bypass Rd	0.0	US	US	similar_name
+S1-10137005	S3	S3-95984355	nonmatch	Rev It Up Bistro LLC	Rev  It Up Bistro	0.8	500 Liberty Lane, Unit 1005, Fayetteville, TN	69 Bypass Road, Pittsburg County, Oklahoma	0.0	US	US	similar_name
+S1-102036925	S2	S2-9117950	nonmatch	Eye Care Associates LLC	EYE NATIONAL CARE ASSOCIATES LLC	0.8	MO, 581 Golfwood Drive, Ballwin	1124 ASH STRET, CARLSBAD, NM	0.0	US	US	similar_name
+S1-100344668	S3	S3-986731108	nonmatch	Star Producer Private Limited	star producer private limited Enterprises	0.8	Ganja, Langaleswar Baliapal, Balasore, Orissa		0.0	India	India	similar_name
+S1-100356281	S3	S3-598248081	nonmatch	Maa Agro Private Limited	MAA SURYA AGRO PRIVATE LIMITED	0.8	17 Sudama Building 2Nd Flrroom No 6 1St Panrapole Lane C P Tank, Mumbai, Maharashtra	No.v/249p, N/A, Malappuram, KL	0.0	India	India	similar_name
+S1-100550396	S3	S3-521898810	nonmatch	High Technology Private Limited	Shivam High Technology  Private Limited	0.8	Kerala, Thycaud-Po, Thiruvananthapuram, Trivandrum, T.C.44/2697-2 2Nd Floor Padma Tower Jagathy Junction, Thiruvananthapuram	No 027/4 Divya Darshan Commercial Complex Dahanukar Colony Kothrud, Pune, MH	0.0	India	India	similar_name
+S1-100568757	S3	S3-70578994	nonmatch	India Jyotika Services Private Limited	India Private Limited Services	0.8	Nitin Residency, Bhatasai Road Near Vashind Station, Vashind, Thane, Maharashtra	C-0016, New Delhi, Gulmohar Park, दिल्ली	0.0	India	India	similar_name
+S1-100698162	S3	S3-832496299	nonmatch	Shivam High Technology Private Limited	Shivam Technology Private Limited	0.8	27/4 Divya Darshan Commercial Complex Dahanukar Colony Kothrud, Pune, Maharashtra	20, Bhopal, Huzur, MP	0.0	India	India	similar_name
+S1-100947068	S3	S3-794837463	nonmatch	Sky Industries Private Limited	SKY Shakti Industries Private Limited	0.8	Of Hanuman Socy Rupinagar, Tal Haveli Pune Bhosari, Haveli, Pune, Maharashtra	C/o.babalya Vithal Jadhav, null, Sindhudurg, Sawantwadi, MH	0.0	India	India	similar_name
+S1-100975072	S3	S3-826656326	nonmatch	Hitech Services Private Limited	Hitech Best Private Limited Services	0.8	Plot No. S.No.341 & 427/B, Sarigam-Manda Road, Gidc, Sarigam, Ta.Um, Argaon, Valsad, Gujarat, Valsad, Dy. Exe. Engineer-Gidc	2C1, Kochi, Ernakulam, KL	0.0	India	India	similar_name
+S1-10149854	S3	S3-274761792	nonmatch	Indo Marketing Private Limited	Vision Indo Marketing Private Limited	0.8	3, Delhi, New Delhi, G/F Shop, Main Road, Angad Nagar, Laxmi Nagar	Bareilly, Deepak Bihar, Rajen, E-##78, Bareilly, UP	0.0	India	India	similar_name
+S1-101712876	S3	S3-211463807	nonmatch	Perfect Investments Private Limited	Perfect Roya1 Investments Private  Limited	0.8	Kantai, Ayodhya Nagar, Nagpur, Plot No.83, Maharashtra, Nagpur	No 5 Shingare Guruji Bhavan, Drbabasaheb Ambedkar Road, Mumbai, MH	0.0	India	India	similar_name
+S1-101785139	S3	S3-714177479	nonmatch	Vijay Consultancy Private Limited	New Vijay Private Consultancy Limited	0.8	4/A1/30, New Ajanta Avenue, Near Krishna Hospital Paud Road, Kothrud, Pune, Maharashtra	Plot No-94, Faridabad, हरियाणा	0.0	India	India	similar_name
+S1-101785139	S2	S2-2022470	nonmatch	Vijay Consultancy Private Limited	NEW VIJAY CONSULTANCY PRIVATE LIMITED	0.8	4/A1/30, New Ajanta Avenue, Near Krishna Hospital Paud Road, Kothrud, Pune, Maharashtra		0.0	India	India	similar_name
+S1-101176737	S2	S2-40170202	nonmatch	Pediatric Dental Care	Pediatric Dental Advanced Care	0.75	Solon, OH, 34251 Summerset Drive	OH, DAYTON, 935 GRAND BOULEVARD	0.111	US	US	similar_name

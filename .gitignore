@@ -1,46 +1,18 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
 .venv/
 venv/
-ENV/
-env/
-.mise.toml.local
-
-# Testing & Linting
 .pytest_cache/
-.pytest-tmp/
 .coverage
 htmlcov/
-.tox/
-.nox/
 .mypy_cache/
 .ruff_cache/
-
-# Jupyter Notebooks
 .ipynb_checkpoints
-
-# IDEs & Editors
 .vscode/
 .idea/
 *.swp
@@ -48,7 +20,7 @@ htmlcov/
 *~
 .DS_Store
 
-# Data & Large Artifacts
+# Data & large artifacts
 dataset/
 data/
 *.zip
@@ -61,8 +33,6 @@ data/
 *.joblib
 *.npy
 *.npz
-
-# Models & Logs
 models/
 checkpoints/
 *.pt
@@ -72,47 +42,33 @@ checkpoints/
 wandb/
 runs/
 lightning_logs/
-
-# Temporary files & outputs
 output/
 tmp/
 temp/
-
-.venv/
 student_resource/
-# OS-generated
-.DS_Store
-*:Zone.Identifier
-
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
-dist/
-build/
-
-# Generated configuration output.  The checked-in neural launch configs are
-# deliberately versioned so compute-machine runs use the reviewed contracts.
-configs/
-!configs/
-configs/*
-!configs/neural/
-!configs/neural/*.json
-audit_output/match_cardinality.tsv
-# IDE
-.vscode/
-.idea/
-
-# Environment
-.env
-venv/
-
 artifacts/
 artifacts.tar
 *.sqlite
 *.sqlite.manifest.json
 audit_report/
-docs/
+audit_output/match_cardinality.tsv
 neural-data/
 oracle_recall_report.tsv*
+
+# Generated configs are ignored except reviewed launch templates.
+configs/
+!configs/
+configs/*
+!configs/neural/
+!configs/neural/*.json
+!configs/member_d/
+!configs/member_d/*.json
+
+# Generated Member D reports remain local.
+reports/member_d/current/
+reports/member_d/*/evaluation.json
+reports/member_d/*/evaluation_summary.tsv
+reports/member_d/*/comparison.json
+reports/member_d/*/comparison.tsv
+reports/member_d/*/ownership_audit.json
+reports/member_d/*/runtime_budget.json

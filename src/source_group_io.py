@@ -1,200 +1,125 @@
-"""Complete source-record group streaming (Member D, §4.2).
-
-Generalises the S1-centric iter_complete_groups in candidate_io.py to work
-with any group key -- in practice (candidate_source, candidate_entity_id).
-
-A source-record group is allowed to span multiple shards as long as:
-  - it is contiguous within each shard, and
-  - it appears in at most one continuous run across all shards.
-
-Once a group is yielded it is "complete"; if rows for that group appear again
-in a later shard the function raises ValueError.
-
-Do NOT use this with the Member B bootstrap sample because it is S2/S3-incomplete.
-"""
-
+"""Strict complete source-record group streaming for Member D."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Iterable, Iterator, Sequence
+from typing import Iterator, Sequence
 
 import pandas as pd
 
+from .neural_contracts import sha256_file
 
-def _check_group_key(columns: Sequence[str], group_columns: Sequence[str]) -> None:
-    missing = [c for c in group_columns if c not in columns]
-    if missing:
-        raise ValueError(f"Shard is missing group key columns: {missing}")
+DEFAULT_GROUP_COLUMNS = ("candidate_source", "candidate_entity_id")
 
 
-def _yield_groups_from_chunks(
-    chunks: Iterable[pd.DataFrame],
-    group_columns: Sequence[str],
-) -> Iterator[pd.DataFrame]:
-    """Yield complete groups from a stream of DataFrame chunks."""
-    carry: pd.DataFrame | None = None
-    completed: set[tuple] = set()
-
-    for chunk in chunks:
-        if chunk.empty:
-            continue
-
-        if carry is not None:
-            chunk = pd.concat([carry, chunk], ignore_index=True)
-            carry = None
-
-        _check_group_key(list(chunk.columns), group_columns)
-
-        # Build a tuple key per row
-        keys = list(
-            map(tuple, chunk[list(group_columns)].astype(str).to_numpy())
-        )
-
-        # Find group boundaries
-        boundaries = [0]
-        for i in range(1, len(keys)):
-            if keys[i] != keys[i - 1]:
-                boundaries.append(i)
-        boundaries.append(len(keys))
-
-        # Yield all complete groups except the last (may be incomplete)
-        for start, end in zip(boundaries[:-2], boundaries[1:-1]):
-            group_key = keys[start]
-            if group_key in completed:
-                raise ValueError(
-                    f"Source-record group {group_key} reappeared after completion. "
-                    "Shards must not interleave groups."
-                )
-            completed.add(group_key)
-            yield chunk.iloc[start:end].reset_index(drop=True)
-
-        last_start = boundaries[-2]
-        carry = chunk.iloc[last_start:].copy()
-
-    # Yield the last carry if non-empty
-    if carry is not None and not carry.empty:
-        group_key = tuple(carry[list(group_columns)].astype(str).iloc[0])
-        if group_key in completed:
-            raise ValueError(
-                f"Source-record group {group_key} reappeared after completion."
-            )
-        yield carry.reset_index(drop=True)
+def _read(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() in {".parquet", ".pq"}:
+        return pd.read_parquet(path)
+    if path.suffix.lower() in {".tsv", ".txt"}:
+        return pd.read_csv(path, sep="\t", dtype=object, keep_default_na=False)
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path, dtype=object, keep_default_na=False)
+    raise ValueError(f"Unsupported shard format: {path}")
 
 
-def _iter_shard(path: Path, batch_size: int) -> Iterator[pd.DataFrame]:
-    """Yield DataFrame chunks from a single shard file (parquet or TSV)."""
-    suffix = path.suffix.casefold()
-    if suffix == ".parquet":
-        yield pd.read_parquet(path)
-    elif suffix in (".tsv", ".csv"):
-        sep = "\t" if suffix == ".tsv" else ","
-        yield from pd.read_csv(
-            path,
-            sep=sep,
-            dtype=object,
-            keep_default_na=False,
-            chunksize=batch_size,
-        )
-    else:
-        raise ValueError(f"Unsupported shard file format: {path}")
+def _manifest_declared_files(manifest: dict) -> dict[str, str | None]:
+    if "generated_file_checksums" in manifest:
+        return {str(k): str(v) for k, v in manifest["generated_file_checksums"].items()}
+    if "files" in manifest:
+        return {str(k): str(v) for k, v in manifest["files"].items()}
+    return {str(x): None for x in manifest.get("shard_order", [])}
 
 
-def _validate_shard_manifests(
-    shard_paths: list[Path],
-    shard_manifests: Sequence[str | Path] | None,
+def validate_source_complete_manifests(
+    shard_paths: Sequence[str | Path], manifest_paths: Sequence[str | Path]
 ) -> None:
-    """Verify all declared shards are present and complete."""
-    if shard_manifests is None:
-        return
-    import json
-
-    for manifest_path in shard_manifests:
-        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        if manifest.get("completion") != "complete":
-            raise ValueError(
-                f"Shard manifest {manifest_path} is not complete "
-                f"(status: {manifest.get('completion', 'unknown')})"
-            )
-        declared = manifest.get("shard_order", [])
-        declared_set = set(declared)
-        present = {str(p.name) for p in shard_paths}
-        missing = declared_set - present
-        if missing:
-            raise FileNotFoundError(
-                f"Declared shards not found: {sorted(missing)}"
-            )
+    present = {Path(p).name: Path(p) for p in shard_paths}
+    declared: dict[str, str | None] = {}
+    for raw in manifest_paths:
+        path = Path(raw)
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        state = manifest.get("completion_state", manifest.get("completion"))
+        if state != "complete":
+            raise ValueError(f"Incomplete shard manifest: {path}")
+        if manifest.get("complete_by_source_record") is not True:
+            raise ValueError(f"Manifest does not guarantee complete source-record groups: {path}")
+        for name, checksum in _manifest_declared_files(manifest).items():
+            base = Path(name).name
+            if base in declared and declared[base] != checksum:
+                raise ValueError(f"Conflicting duplicate shard declaration: {base}")
+            declared[base] = checksum
+    missing = sorted(set(declared) - set(present))
+    extra = sorted(set(present) - set(declared))
+    if missing:
+        raise FileNotFoundError(f"Declared source-complete shards missing: {missing}")
+    if extra:
+        raise ValueError(f"Undeclared shards supplied to source-complete stream: {extra}")
+    for name, expected in declared.items():
+        if expected and sha256_file(present[name]) != expected:
+            raise ValueError(f"Checksum mismatch for source-complete shard: {present[name]}")
 
 
 def iter_complete_source_groups(
     paths: Sequence[str | Path],
     *,
-    group_columns: Sequence[str] = ("candidate_source", "candidate_entity_id"),
-    batch_size: int = 100_000,
-    shard_manifests: Sequence[str | Path] | None = None,
+    group_columns: Sequence[str] = DEFAULT_GROUP_COLUMNS,
+    manifest_paths: Sequence[str | Path] | None = None,
 ) -> Iterator[pd.DataFrame]:
-    """Stream complete (candidate_source, candidate_entity_id) groups across shards.
-
-    Parameters
-    ----------
-    paths : sequence of file paths or a single directory
-        If a directory is given, all .parquet and .tsv files are sorted and
-        processed in order.
-    group_columns : sequence of str
-        Columns defining the group key. Default: (candidate_source, candidate_entity_id).
-    batch_size : int
-        Chunk size when reading TSV files.
-    shard_manifests : sequence of manifest JSON paths (optional)
-        When provided, validates that every declared shard is present and marked
-        complete before streaming begins.
-
-    Yields
-    ------
-    pd.DataFrame
-        One complete group per yield, in deterministic order.
-
-    Raises
-    ------
-    ValueError
-        If a group reappears after completion, or manifest validation fails.
-    FileNotFoundError
-        If declared shards are missing.
-    """
-    shard_paths: list[Path] = []
-    for p in paths:
-        p = Path(p)
-        if p.is_dir():
-            for f in sorted(p.iterdir()):
-                if f.suffix.casefold() in (".parquet", ".tsv", ".csv") and f.is_file():
-                    shard_paths.append(f)
-        elif p.is_file():
-            shard_paths.append(p)
-        else:
-            raise FileNotFoundError(f"Shard path not found: {p}")
-
+    shard_paths = [Path(p) for p in paths]
     if not shard_paths:
         return
+    for p in shard_paths:
+        if not p.exists():
+            raise FileNotFoundError(p)
+    if manifest_paths is not None:
+        validate_source_complete_manifests(shard_paths, manifest_paths)
 
-    _validate_shard_manifests(shard_paths, shard_manifests)
+    schema: list[str] | None = None
+    carry: list[pd.DataFrame] = []
+    carry_key: tuple[str, ...] | None = None
+    completed: set[tuple[str, ...]] = set()
 
-    # Validate schema consistency across shards
-    first_schema: list[str] | None = None
-    for shard_path in shard_paths:
-        if shard_path.suffix.casefold() == ".parquet":
-            df_head = pd.read_parquet(shard_path).head(0)
-        else:
-            df_head = pd.read_csv(shard_path, sep="\t", nrows=0, dtype=object)
-        schema = list(df_head.columns)
-        if first_schema is None:
-            first_schema = schema
-        elif schema != first_schema:
-            raise ValueError(
-                f"Schema mismatch between shards:\n"
-                f"  first shard : {first_schema}\n"
-                f"  {shard_path.name}: {schema}"
-            )
+    def flush() -> pd.DataFrame | None:
+        nonlocal carry, carry_key
+        if not carry:
+            return None
+        assert carry_key is not None
+        if carry_key in completed:
+            raise ValueError(f"Source group reappeared after completion: {carry_key}")
+        completed.add(carry_key)
+        result = pd.concat(carry, ignore_index=True)
+        carry = []
+        carry_key = None
+        return result
 
-    def _all_chunks() -> Iterator[pd.DataFrame]:
-        for shard_path in shard_paths:
-            yield from _iter_shard(shard_path, batch_size)
-
-    yield from _yield_groups_from_chunks(_all_chunks(), group_columns)
+    for path in shard_paths:
+        frame = _read(path)
+        if schema is None:
+            schema = list(frame.columns)
+        elif list(frame.columns) != schema:
+            raise ValueError(f"Shard schema mismatch: {path}")
+        missing = [c for c in group_columns if c not in frame.columns]
+        if missing:
+            raise ValueError(f"Shard missing source-group columns {missing}: {path}")
+        if frame.empty:
+            continue
+        keys = list(map(tuple, frame[list(group_columns)].astype(str).to_numpy()))
+        start = 0
+        for i in range(1, len(frame) + 1):
+            boundary = i == len(frame) or keys[i] != keys[i - 1]
+            if not boundary:
+                continue
+            key = keys[start]
+            piece = frame.iloc[start:i].copy()
+            if carry_key is None:
+                carry_key = key
+            if key != carry_key:
+                result = flush()
+                if result is not None:
+                    yield result
+                carry_key = key
+            carry.append(piece)
+            start = i
+    result = flush()
+    if result is not None:
+        yield result

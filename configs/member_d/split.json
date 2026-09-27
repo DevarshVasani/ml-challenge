@@ -1,0 +1,11 @@
+{
+  "threshold_queries_path": "member-b-starter-v1/threshold_queries.tsv",
+  "truth_path": "member-b-starter-v1/evaluation_truth.tsv",
+  "output_dir": ".",
+  "seed": 42,
+  "proportions": {
+    "fusion_fit": 0.4,
+    "calibration": 0.3,
+    "selection": 0.3
+  }
+}

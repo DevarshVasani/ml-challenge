@@ -1,0 +1,6 @@
+{
+  "version": "calibration_v1",
+  "method": "platt",
+  "min_isotonic_per_class": 500,
+  "test_prior_correction": false
+}

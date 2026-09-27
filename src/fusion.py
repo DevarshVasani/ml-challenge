@@ -1,311 +1,121 @@
-"""Fusion model fitting for Member D (§6.1).
-
-Fits a regularized LogisticRegression on fusion_fit partition rows only.
-Trains SEPARATE models for neural_fusion and tree_only routes.
-Never applies the neural-fusion model to rows with has_neural_score=0.
-
-Feature allowlist is explicit; no auto-discovery of numeric columns.
-"""
-
+"""Leakage-safe route-specific logistic fusion for Member D."""
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Sequence
 
+import joblib
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
 
 from .member_d_contracts import (
-    PAIR_KEY,
-    ROUTE_COL_DECISION,
-    ROUTE_COL_HAS,
-    ROUTE_NEURAL_FUSION,
-    ROUTE_TREE_ONLY,
-    SCORE_COL_NEURAL,
-    SCORE_COL_TREE,
-    FORBIDDEN_PRODUCTION_COLUMNS,
+    DECISION_ROUTE, MATCH_PROBABILITY, NEURAL_LOGIT, NEURAL_PROBABILITY, PAIR_KEY,
+    ROUTE_NEURAL_FUSION, ROUTE_TREE_ONLY, TREE_SCORE,
+    validate_feature_allowlist, validate_joined_scores,
 )
+from .member_d_manifest import MemberDManifest, write_manifest
+from .neural_contracts import sha256_file
 
-try:
-    import joblib
-except ImportError as _e:
-    raise ImportError("joblib is required for fusion model fitting") from _e
-
-
-# ---------------------------------------------------------------------------
-# Default feature allowlist
-# ---------------------------------------------------------------------------
-
-# [Member D Plan 2: Fake-Pattern Features Review]
-# The following Member C string features have shown strong diagnostic 
-# performance on fake patterns (branch words, legal forms, house numbers).
-# They are explicitly preserved here for review when the fusion feature 
-# allowlist is finalized. Do NOT automatically include them without
-# validating on D's fusion_fit/calibration splits:
-# - postcode_match_house_mismatch
-# - legal_form_agreement
-# - house_number_match
-# - name_tokens_extra_in_b
-# - name_tokens_missing_from_b
-
-
-DEFAULT_NEURAL_FEATURES: list[str] = [
-    SCORE_COL_TREE,
-    SCORE_COL_NEURAL,
-    "tree_logit",
-    "neural_logit",
-    "source_s2_indicator",
-    "source_s3_indicator",
-    "route_indicator",
-    "source_competitor_count",
-    "tree_source_rank",
-    "tree_gap_to_best",
-    "tree_best_second_gap",
-    "tree_near_tie_count",
-    "is_tree_best_owner",
+DEFAULT_NEURAL_FEATURES = [
+    TREE_SCORE, "tree_logit", "neural_logit_feature",
+    "competing_s1_count", "competing_s1_score_gap", "competing_best_second_gap",
+    "competing_near_tie_count", "is_top_competing_s1",
+    "postcode_match_house_mismatch", "legal_form_agreement", "house_number_match",
+    "name_tokens_extra_in_b", "name_tokens_missing_from_b",
+    "source_s2_indicator", "source_s3_indicator",
 ]
-
-DEFAULT_TREE_FEATURES: list[str] = [
-    SCORE_COL_TREE,
-    "tree_logit",
-    "source_s2_indicator",
-    "source_s3_indicator",
-    "source_competitor_count",
-    "tree_source_rank",
-    "tree_gap_to_best",
-    "tree_best_second_gap",
-    "tree_near_tie_count",
-    "is_tree_best_owner",
-]
+DEFAULT_TREE_FEATURES = [f for f in DEFAULT_NEURAL_FEATURES if f not in {"neural_logit_feature"}]
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _logit(p: np.ndarray, eps: float = 1e-6) -> np.ndarray:
-    p = np.clip(p, eps, 1 - eps)
-    return np.log(p / (1 - p))
+def _read(path: str | Path) -> pd.DataFrame:
+    p = Path(path); return pd.read_parquet(p) if p.suffix.lower() in {".parquet", ".pq"} else pd.read_csv(p, sep="\t", dtype=object, keep_default_na=False)
 
 
-def _add_derived_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add logit transforms and indicator columns."""
-    out = df.copy()
-    if SCORE_COL_TREE in out.columns:
-        t = pd.to_numeric(out[SCORE_COL_TREE], errors="coerce").fillna(0.5)
-        out["tree_logit"] = _logit(t.to_numpy())
-    if SCORE_COL_NEURAL in out.columns:
-        n = pd.to_numeric(out[SCORE_COL_NEURAL], errors="coerce")
-        mask = n.notna()
-        logit_col = np.full(len(out), np.nan)
-        logit_col[mask] = _logit(n[mask].to_numpy())
-        out["neural_logit"] = logit_col
-    if "candidate_source" in out.columns:
-        out["source_s2_indicator"] = (out["candidate_source"].astype(str) == "S2").astype("int8")
-        out["source_s3_indicator"] = (out["candidate_source"].astype(str) == "S3").astype("int8")
-    if ROUTE_COL_HAS in out.columns:
-        out["route_indicator"] = pd.to_numeric(out[ROUTE_COL_HAS], errors="coerce").fillna(0)
+def _join_labels(scores: pd.DataFrame, labels_path: str | Path) -> pd.DataFrame:
+    labels = _read(labels_path)
+    needed = set(PAIR_KEY + ["label"])
+    if not needed.issubset(labels.columns): raise ValueError(f"Label table missing: {sorted(needed - set(labels.columns))}")
+    if labels.duplicated(PAIR_KEY).any(): raise ValueError("Duplicate keyed labels")
+    extra = set(map(tuple, labels[PAIR_KEY].astype(str).to_numpy())) - set(map(tuple, scores[PAIR_KEY].astype(str).to_numpy()))
+    if extra: raise ValueError(f"Labels contain unknown pairs: {sorted(extra)[:5]}")
+    return scores.merge(labels[PAIR_KEY + ["label"]], on=PAIR_KEY, how="left", validate="1:1")
+
+
+def _derived(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    tree = pd.to_numeric(out[TREE_SCORE], errors="raise").clip(1e-6, 1 - 1e-6)
+    out["tree_logit"] = np.log(tree / (1 - tree))
+    if NEURAL_LOGIT in out.columns:
+        out["neural_logit_feature"] = pd.to_numeric(out[NEURAL_LOGIT], errors="coerce")
+    elif NEURAL_PROBABILITY in out.columns:
+        p = pd.to_numeric(out[NEURAL_PROBABILITY], errors="coerce").clip(1e-6, 1 - 1e-6)
+        out["neural_logit_feature"] = np.log(p / (1 - p))
+    out["source_s2_indicator"] = (out["candidate_source"].astype(str) == "S2").astype(int)
+    out["source_s3_indicator"] = (out["candidate_source"].astype(str) == "S3").astype(int)
     return out
 
 
-def _build_feature_matrix(df: pd.DataFrame, feature_list: list[str]) -> np.ndarray:
-    """Build float matrix for the given feature list.  Missing columns -> zeros."""
-    cols = []
-    for feat in feature_list:
-        if feat in df.columns:
-            cols.append(pd.to_numeric(df[feat], errors="coerce").fillna(0.0).to_numpy())
-        else:
-            cols.append(np.zeros(len(df), dtype="float64"))
-    return np.column_stack(cols)
-
-
-def _sha256_df(df: pd.DataFrame) -> str:
-    digest = hashlib.sha256()
-    digest.update(df.to_csv(index=False).encode())
-    return digest.hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def _matrix(frame: pd.DataFrame, features: Sequence[str]) -> np.ndarray:
+    missing = [f for f in features if f not in frame.columns]
+    if missing: raise ValueError(f"Fusion feature columns missing: {missing}")
+    x = frame[list(features)].apply(pd.to_numeric, errors="coerce")
+    if x.isna().any().any():
+        bad = x.columns[x.isna().any()].tolist(); raise ValueError(f"Fusion features contain missing/non-numeric values: {bad}")
+    return x.to_numpy(float)
 
 
 def fit_fusion(
     joined_scores_path: str | Path,
+    labels_path: str | Path,
     partition_split_path: str | Path,
     config: dict[str, Any],
     output_dir: str | Path,
 ) -> dict[str, Any]:
-    """Fit fusion model(s) using only fusion_fit partition rows.
+    scores = _read(joined_scores_path); validate_joined_scores(scores)
+    split = pd.read_csv(partition_split_path, sep="\t", dtype=str, keep_default_na=False)
+    fit_ids = set(split.loc[split.member_d_partition == "fusion_fit", "source1_entity_id"])
+    labeled = _join_labels(scores[scores.source1_entity_id.astype(str).isin(fit_ids)].copy(), labels_path)
+    if labeled["label"].isna().any(): raise ValueError("Missing keyed labels for fusion_fit rows")
+    labeled = _derived(labeled)
 
-    Parameters
-    ----------
-    joined_scores_path : path to joined_scores.parquet (output of score_join)
-    partition_split_path : path to configs/member_d/selection_split.tsv
-    config : dict with optional keys:
-        neural_features     list[str]  default DEFAULT_NEURAL_FEATURES
-        tree_features       list[str]  default DEFAULT_TREE_FEATURES
-        C                   float      LogisticRegression regularisation (default 1.0)
-        max_iter            int        default 1000
-        solver              str        default 'lbfgs'
-        class_weight        str|None   default 'balanced'
-        version             str        model version tag
-        git_commit          str|None
-    output_dir : where to write model artefacts
-
-    Returns
-    -------
-    dict with keys: model_dir, neural_row_count, tree_row_count, version
-    """
-    from sklearn.linear_model import LogisticRegression
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    neural_features: list[str] = config.get("neural_features", DEFAULT_NEURAL_FEATURES)
-    tree_features: list[str] = config.get("tree_features", DEFAULT_TREE_FEATURES)
-
-    # Validate allowlist: no forbidden columns
-    bad = FORBIDDEN_PRODUCTION_COLUMNS & (set(neural_features) | set(tree_features))
-    if bad:
-        raise ValueError(f"Feature allowlist contains forbidden columns: {sorted(bad)}")
-
-    C = float(config.get("C", 1.0))
-    max_iter = int(config.get("max_iter", 1000))
-    solver = str(config.get("solver", "lbfgs"))
-    class_weight = config.get("class_weight", "balanced")
-    version = str(config.get("version", "v1"))
-
-    # ---- load data ----
-    scores = pd.read_parquet(joined_scores_path)
-
-    # Validate no forbidden columns
-    forbidden_present = FORBIDDEN_PRODUCTION_COLUMNS & set(scores.columns)
-    if forbidden_present:
-        raise ValueError(
-            f"joined_scores contains forbidden columns: {sorted(forbidden_present)}"
-        )
-
-    if "label" not in scores.columns:
-        raise ValueError(
-            "joined_scores must contain a 'label' column for fusion_fit. "
-            "Do not include this in production score artifacts."
-        )
-
-    # ---- load partition ----
-    split_df = pd.read_csv(partition_split_path, sep="\t", dtype=str, keep_default_na=False)
-    fit_ids = set(
-        split_df.loc[split_df["member_d_partition"] == "fusion_fit", "source1_entity_id"]
-    )
-    fit_rows = scores[scores["source1_entity_id"].isin(fit_ids)].copy()
-    if fit_rows.empty:
-        raise ValueError("No fusion_fit rows found after partition filter.")
-
-    # ---- derive features ----
-    fit_rows = _add_derived_features(fit_rows)
-
-    # ---- split by route ----
-    has_neural_col = ROUTE_COL_HAS if ROUTE_COL_HAS in fit_rows.columns else None
-    if has_neural_col:
-        neural_mask = pd.to_numeric(fit_rows[has_neural_col], errors="coerce").fillna(0) == 1
-    else:
-        neural_mask = pd.Series(False, index=fit_rows.index)
-
-    neural_rows = fit_rows[neural_mask]
-    tree_rows = fit_rows[~neural_mask]
-
-    manifests: dict[str, Any] = {}
-
-    def _fit_one(subset: pd.DataFrame, features: list[str], route_name: str) -> None:
-        if subset.empty:
-            print(f"[fusion] No {route_name} rows; skipping.")
-            return
-        X = _build_feature_matrix(subset, features)
-        y = pd.to_numeric(subset["label"], errors="coerce").fillna(0).astype(int).to_numpy()
-        model = LogisticRegression(
-            C=C, max_iter=max_iter, solver=solver, class_weight=class_weight,
-        )
-        model.fit(X, y)
-        route_dir = output_dir / route_name
-        route_dir.mkdir(parents=True, exist_ok=True)
+    out = Path(output_dir); out.mkdir(parents=True, exist_ok=True)
+    features_by_route = {
+        ROUTE_NEURAL_FUSION: config.get("neural_features", DEFAULT_NEURAL_FEATURES),
+        ROUTE_TREE_ONLY: config.get("tree_features", DEFAULT_TREE_FEATURES),
+    }
+    manifests = {}
+    for route, features in features_by_route.items():
+        validate_feature_allowlist(features)
+        rows = labeled[labeled[DECISION_ROUTE].astype(str) == route].copy()
+        if rows.empty: continue
+        y = pd.to_numeric(rows.label, errors="raise").astype(int).to_numpy()
+        if len(np.unique(y)) < 2: raise ValueError(f"Fusion route {route} has only one label class")
+        model = LogisticRegression(C=float(config.get("C", 1.0)), max_iter=int(config.get("max_iter", 1000)), class_weight=config.get("class_weight", "balanced"), solver="lbfgs")
+        model.fit(_matrix(rows, features), y)
+        route_dir = out / route; route_dir.mkdir(parents=True, exist_ok=True)
         joblib.dump(model, route_dir / "fusion_model.joblib")
         manifest = {
-            "route": route_name,
-            "features": features,
-            "C": C, "max_iter": max_iter, "solver": solver, "class_weight": class_weight,
-            "version": version,
-            "training_row_count": len(subset),
-            "class_counts": {str(k): int(v) for k, v in zip(*np.unique(y, return_counts=True))},
-            "git_commit": config.get("git_commit"),
+            "route": route, "features": list(features), "training_partition": "fusion_fit",
+            "training_row_count": len(rows), "positive_count": int(y.sum()), "version": str(config.get("version", "v1")),
+            "joined_scores_sha256": sha256_file(joined_scores_path), "labels_sha256": sha256_file(labels_path), "split_sha256": sha256_file(partition_split_path),
         }
-        (route_dir / "fusion_manifest.json").write_text(
-            json.dumps(manifest, indent=2), encoding="utf-8"
-        )
-        manifests[route_name] = manifest
-        print(f"[fusion] {route_name}: {len(subset)} rows fitted -> {route_dir}")
-
-    _fit_one(neural_rows, neural_features, ROUTE_NEURAL_FUSION)
-    _fit_one(tree_rows, tree_features, ROUTE_TREE_ONLY)
-
-    result = {
-        "model_dir": str(output_dir),
-        "neural_row_count": len(neural_rows),
-        "tree_row_count": len(tree_rows),
-        "version": version,
-        "manifests": manifests,
-    }
-    (output_dir / "fusion_summary.json").write_text(
-        json.dumps(result, indent=2), encoding="utf-8"
-    )
-    return result
+        (route_dir / "fusion_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8"); manifests[route] = manifest
+    return {"manifests": manifests, "model_dir": str(out)}
 
 
-def apply_fusion(
-    scores: pd.DataFrame,
-    fusion_model_dir: str | Path,
-) -> pd.DataFrame:
-    """Apply fitted fusion models to produce raw (uncalibrated) fusion scores.
-
-    Applies the neural_fusion model to neural-scored rows and the tree_only
-    model to tree-only rows.  Never applies the neural model to tree-only rows.
-
-    Returns frame with new column 'fusion_score' (prob of match, pre-calibration).
-    """
-    fusion_model_dir = Path(fusion_model_dir)
-    out = scores.copy()
-    out["fusion_score"] = float("nan")
-
-    has_neural_col = ROUTE_COL_HAS if ROUTE_COL_HAS in out.columns else None
-
-    for route_name, mask_fn in [
-        (ROUTE_NEURAL_FUSION, lambda df: (
-            pd.to_numeric(df.get(ROUTE_COL_HAS, pd.Series(0, index=df.index)), errors="coerce") == 1
-        )),
-        (ROUTE_TREE_ONLY, lambda df: (
-            pd.to_numeric(df.get(ROUTE_COL_HAS, pd.Series(1, index=df.index)), errors="coerce") == 0
-        )),
-    ]:
-        route_dir = fusion_model_dir / route_name
-        model_path = route_dir / "fusion_model.joblib"
-        manifest_path = route_dir / "fusion_manifest.json"
-        if not model_path.exists():
-            continue
-        model = joblib.load(model_path)
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        features = manifest["features"]
-
-        subset = out[mask_fn(out)]
-        if subset.empty:
-            continue
-
-        subset_derived = _add_derived_features(subset)
-        X = _build_feature_matrix(subset_derived, features)
-        if 1 in list(getattr(model, "classes_", [])):
-            proba = model.predict_proba(X)[:, list(model.classes_).index(1)]
-        else:
-            proba = np.zeros(len(X))
-        out.loc[subset.index, "fusion_score"] = proba
-
+def apply_fusion(scores: pd.DataFrame, fusion_model_dir: str | Path) -> pd.DataFrame:
+    validate_joined_scores(scores); out = _derived(scores); out["fusion_score"] = np.nan
+    root = Path(fusion_model_dir)
+    for route in (ROUTE_NEURAL_FUSION, ROUTE_TREE_ONLY):
+        mask = out[DECISION_ROUTE].astype(str) == route
+        if not mask.any(): continue
+        manifest_path = root / route / "fusion_manifest.json"; model_path = root / route / "fusion_model.joblib"
+        if not manifest_path.exists() or not model_path.exists(): raise FileNotFoundError(f"Missing fusion artifact for route {route}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")); model = joblib.load(model_path)
+        x = _matrix(out.loc[mask], manifest["features"]); classes = list(model.classes_)
+        out.loc[mask, "fusion_score"] = model.predict_proba(x)[:, classes.index(1)]
+    active = out[DECISION_ROUTE].isin([ROUTE_NEURAL_FUSION, ROUTE_TREE_ONLY])
+    if out.loc[active, "fusion_score"].isna().any(): raise ValueError("Some active-route rows did not receive fusion scores")
     return out
