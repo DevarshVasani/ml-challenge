@@ -25,6 +25,12 @@ def predict_pair_model(test_features: str | Path | pd.DataFrame, model_dir: str 
     model_dir = Path(model_dir); output_dir = Path(output_dir); output_dir.mkdir(parents=True, exist_ok=True)
     model = joblib.load(model_dir / "final_model.joblib")
     feature_columns = json.loads((model_dir / "feature_columns.json").read_text(encoding="utf-8"))
+
+    from .member_d_contracts import validate_feature_allowlist
+    if "is_injected_positive" in feature_columns or "positive_injected_for_training" in feature_columns:
+        raise ValueError("Tree model is tainted with injected positive features.")
+    validate_feature_allowlist(feature_columns)
+
     config_path = model_dir / "training_config.json"
     if config_path.exists():
         config = BaselineModelConfig.from_mapping(json.loads(config_path.read_text(encoding="utf-8")))
@@ -46,7 +52,20 @@ def predict_pair_model(test_features: str | Path | pd.DataFrame, model_dir: str 
         raise ValueError(f"Test feature table is missing trained feature columns: {missing_features}")
     # Labels and endpoint folds are deliberately ignored even if accidentally present.
     scores = _feature_matrix(frame, feature_columns)
-    frame = frame[["source1_entity_id", "candidate_entity_id"]].copy()
+    # §1.2  Preserve candidate_source so downstream D code can join on the full
+    # 3-part pair key. Derive from entity_id prefix when the input feature table
+    # lacks the column (old inputs); fail on ambiguous IDs.
+    _preserve = ["source1_entity_id", "candidate_entity_id"]
+    if "candidate_source" in frame.columns:
+        _preserve.append("candidate_source")
+    else:
+        from .member_d_contracts import derive_candidate_source
+        frame = frame.copy()
+        frame["candidate_source"] = (
+            frame["candidate_entity_id"].astype(str).map(derive_candidate_source)
+        )
+        _preserve.append("candidate_source")
+    frame = frame[_preserve].copy()
     frame["score"] = model.predict_proba(scores)[:, list(model.classes_).index(1)] if 1 in list(getattr(model, "classes_", [])) else 0.0
     frame["score"] = pd.to_numeric(frame["score"], errors="coerce").fillna(0.0)
     frame["__order"] = range(len(frame))
@@ -59,6 +78,22 @@ def predict_pair_model(test_features: str | Path | pd.DataFrame, model_dir: str 
     if s1_ids is not None:
         predictions = {str(s1): predictions.get(str(s1), []) for s1 in s1_ids}
     (output_dir / "predictions.json").write_text(json.dumps(predictions, indent=2), encoding="utf-8")
+    
+    import hashlib
+    manifest = {
+        "tree_feature_contract_validated": True,
+        "tree_feature_contract_validation_version": "member_d_v1",
+        "tree_feature_columns_sha256": hashlib.sha256(json.dumps(feature_columns).encode()).hexdigest(),
+        "tree_training_git_sha": config.git_commit if config_path.exists() and hasattr(config, 'git_commit') else None,
+        "tree_feature_schema_version": config.feature_schema_version if config_path.exists() and hasattr(config, 'feature_schema_version') else None,
+    }
+    if "is_injected_positive" in feature_columns:
+        manifest["invalid_for_selection"] = True
+        manifest["invalid_reason"] = "tree training feature leakage: is_injected_positive"
+        manifest["feature_contract_valid"] = False
+    else:
+        manifest["feature_contract_valid"] = True
+    (output_dir / "prediction_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return {"scores": frame, "predictions": predictions, "threshold": float(threshold)}
 
 
