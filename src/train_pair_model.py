@@ -24,6 +24,7 @@ PAIR_ID_COLUMNS = {"source1_entity_id", "candidate_entity_id"}
 NON_FEATURE_COLUMNS = PAIR_ID_COLUMNS | {
     "label", "fold", "source1_fold", "candidate_fold",
     "positive_injected_for_training",  # truth-derived: only training pairs know this
+    "is_injected_positive",  # provenance flag: 1 only for synthetic training positives, a leak
     "candidate_source", "retrieval_provenance",  # categorical strings, not raw numeric features
     "name_a", "address_a", "country_a", "name_b", "address_b", "country_b",  # raw text, not features
 }
@@ -33,7 +34,7 @@ FEATURE_ALLOWLIST_PREFIXES = (
     "candidate_count", "near_tie_", "best_", "second_", "is_strongest_",
     "strongest_", "competing_", "house_", "unit_", "legal_form_", "jaro_",
     "jaccard_", "length_", "exact_", "postcode_", "rare_token_", "address_a_missing", "address_b_missing", "address_carries_despite_name_conflict",
-    "strong_name_", "weak_name_", "is_injected_positive", "is_top_competing_",
+    "strong_name_", "weak_name_", "is_top_competing_",
 )
 AUTO_POSITIVE_WEIGHT_MIN = 1.0
 AUTO_POSITIVE_WEIGHT_MAX = 20.0
